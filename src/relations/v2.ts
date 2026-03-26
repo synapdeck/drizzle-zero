@@ -40,13 +40,6 @@ function isV2Entry(value: unknown): value is V2RelationsEntry {
 // ---- extractor ----
 
 export const v2Extractor: RelationExtractor = {
-  detect(schema) {
-    for (const value of Object.values(schema)) {
-      if (isV2Entry(value)) return true;
-    }
-    return false;
-  },
-
   extract(ctx) {
     const relationships: ExtractedRelationships = {};
     extractManyToMany(ctx, relationships);

@@ -28,13 +28,6 @@ import type {
 // ---- extractor ----
 
 export const v1Extractor: RelationExtractor = {
-  detect(schema) {
-    for (const value of Object.values(schema)) {
-      if (is(value, Relations)) return true;
-    }
-    return false;
-  },
-
   extract(ctx) {
     const relationships: ExtractedRelationships = {};
     extractManyToMany(ctx, relationships);

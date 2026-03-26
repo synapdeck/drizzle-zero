@@ -183,10 +183,17 @@ type DrizzleToZeroSchema<
 };
 
 // ---------------------------------------------------------------------------
-// Extractor registry
+// Version detection — checked once at module load time
 // ---------------------------------------------------------------------------
 
-const extractors: RelationExtractor[] = [v2Extractor, v1Extractor];
+import * as drizzleOrm from 'drizzle-orm';
+
+/**
+ * `defineRelations` exists only in drizzle-orm >= 1.0.
+ * `Relations` exists only in drizzle-orm < 1.0.
+ */
+const isDrizzle1 = typeof (drizzleOrm as any).defineRelations === 'function';
+const extractor: RelationExtractor = isDrizzle1 ? v2Extractor : v1Extractor;
 
 // ---------------------------------------------------------------------------
 // drizzleZeroConfig
@@ -286,29 +293,13 @@ const drizzleZeroConfig = <
 
   // ---- Extract relationships ----
   const schemaRecord = schema as Record<string, unknown>;
-  let relationships: ExtractedRelationships = {};
-
-  const extractor = extractors.find(e => e.detect(schemaRecord));
-  if (extractor) {
-    relationships = extractor.extract({
-      schema: schemaRecord,
-      debug: config?.debug,
-      includedTables: config?.tables as Record<string, unknown> | undefined,
-      manyToMany,
-      getDrizzleKeyFromTable: getDrizzleKeyFromTableFn,
-    });
-  } else if (manyToMany) {
-    // No extractor matched (no relation definitions in schema), but we
-    // have manyToMany config with explicit fields — use V1 extractor as
-    // it handles the explicit object form without needing Relations.
-    relationships = v1Extractor.extract({
-      schema: schemaRecord,
-      debug: config?.debug,
-      includedTables: config?.tables as Record<string, unknown> | undefined,
-      manyToMany,
-      getDrizzleKeyFromTable: getDrizzleKeyFromTableFn,
-    });
-  }
+  const relationships: ExtractedRelationships = extractor.extract({
+    schema: schemaRecord,
+    debug: config?.debug,
+    includedTables: config?.tables as Record<string, unknown> | undefined,
+    manyToMany,
+    getDrizzleKeyFromTable: getDrizzleKeyFromTableFn,
+  });
 
   // ---- Validate relation names don't collide with column names ----
   for (const [tableName, rels] of Object.entries(relationships)) {

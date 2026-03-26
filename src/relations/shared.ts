@@ -40,11 +40,6 @@ export type ManyToManyEntry =
  */
 export interface RelationExtractor {
   /**
-   * Returns true if this extractor can handle the given schema.
-   */
-  detect(schema: Record<string, unknown>): boolean;
-
-  /**
    * Extract all relationships from the schema, including manyToMany.
    */
   extract(ctx: ExtractionContext): ExtractedRelationships;
