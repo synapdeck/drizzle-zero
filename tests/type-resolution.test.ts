@@ -9,7 +9,7 @@ import {
 describe('resolveCustomTypes', () => {
   test('resolves primitive column types', () => {
     const project = new Project({
-      tsConfigFilePath: path.resolve(__dirname, '../tsconfig.json'),
+      tsConfigFilePath: path.resolve(__dirname, 'tsconfig.test.json'),
       skipAddingFilesFromTsConfig: true,
     });
 
@@ -103,7 +103,7 @@ describe('resolveCustomTypes', () => {
 
   test('deduplicates repeated table/column requests', () => {
     const project = new Project({
-      tsConfigFilePath: path.resolve(__dirname, '../tsconfig.json'),
+      tsConfigFilePath: path.resolve(__dirname, 'tsconfig.test.json'),
       skipAddingFilesFromTsConfig: true,
     });
 
@@ -144,7 +144,7 @@ describe('resolveCustomTypes', () => {
 
   test('resolves ReadonlyJSONValue and includes it in the result map', () => {
     const project = new Project({
-      tsConfigFilePath: path.resolve(__dirname, '../tsconfig.json'),
+      tsConfigFilePath: path.resolve(__dirname, 'tsconfig.test.json'),
       skipAddingFilesFromTsConfig: true,
     });
 
