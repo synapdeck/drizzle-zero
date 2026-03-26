@@ -12,10 +12,16 @@ import {
   drizzleZeroConfig,
   type DrizzleToZeroSchema,
   type ZeroCustomType,
-} from '../src/relations';
-import {assertEqual, expectSchemaDeepEqual} from './utils';
+} from '../../src/relations';
+import {assertEqual, expectSchemaDeepEqual} from '../utils';
+import type {VersionConfig} from './version-config';
 
-describe('relationships', () => {
+export function defineRelationsSuite({
+  name,
+  schemasDir,
+  errors,
+}: VersionConfig) {
+describe(`relationships (${name})`, () => {
   test('relationships - no tables', async ({expect}) => {
     await expect(() =>
       drizzleZeroConfig(
@@ -36,7 +42,7 @@ describe('relationships', () => {
   test('relationships - importing a zero schema instead of a drizzle schema', async ({
     expect,
   }) => {
-    const {schema: zeroSchema} = await import('./schemas-v1/one-to-many.zero');
+    const {schema: zeroSchema} = await import(`${schemasDir}/one-to-many.zero`);
 
     await expect(() =>
       drizzleZeroConfig(zeroSchema),
@@ -47,7 +53,7 @@ describe('relationships', () => {
 
   test('relationships - many-to-many-incorrect-many', async ({expect}) => {
     await expect(
-      import('./schemas-v1/many-to-many-incorrect-many.zero'),
+      import(`${schemasDir}/many-to-many-incorrect-many.zero`),
     ).rejects.toThrowErrorMatchingInlineSnapshot(
       `[Error: drizzle-zero: Invalid many-to-many configuration for users.usersToGroups: Not all required fields were provided.]`,
     );
@@ -55,7 +61,7 @@ describe('relationships', () => {
 
   test('relationships - many-to-many-missing-foreign-key', async () => {
     const {schema: manyToManyMissingForeignKeyZeroSchema} =
-      await import('./schemas-v1/many-to-many-missing-foreign-key.zero');
+      await import(`${schemasDir}/many-to-many-missing-foreign-key.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -155,15 +161,13 @@ describe('relationships', () => {
     expect,
   }) => {
     await expect(
-      import('./schemas-v1/many-to-many-duplicate-relationship.zero'),
-    ).rejects.toThrowErrorMatchingInlineSnapshot(
-      `[Error: drizzle-zero: Duplicate relationship found for: usersToGroups (from users to usersToGroups).]`,
-    );
+      import(`${schemasDir}/many-to-many-duplicate-relationship.zero`),
+    ).rejects.toThrow(errors.duplicateRelationship);
   });
 
   test('relationships - one-to-one-missing-foreign-key', async () => {
     const {schema: oneToOneMissingForeignKeyZeroSchema} =
-      await import('./schemas-v1/one-to-one-missing-foreign-key.zero');
+      await import(`${schemasDir}/one-to-one-missing-foreign-key.zero`);
 
     const expectedUsers = table('users')
       .columns({
@@ -214,25 +218,20 @@ describe('relationships', () => {
 
   test('relationships - one-to-many-missing-named', async ({expect}) => {
     await expect(
-      import('./schemas-v1/one-to-many-missing-named.zero'),
-    ).rejects.toThrowErrorMatchingInlineSnapshot(
-      `[Error: relations -> users: { author: r.many.posts(...) }: not enough data provided to build the relation - "from"/"to" are not defined, and there is no reverse relation of table "posts" with alias "author"]`,
-    );
+      import(`${schemasDir}/one-to-many-missing-named.zero`),
+    ).rejects.toThrow(errors.missingNamedRelation);
   });
 
   test('relationships - one-to-many-missing-one', async ({expect}) => {
     await expect(
-      import('./schemas-v1/one-to-many-missing-one.zero'),
-    ).rejects.toThrowErrorMatchingInlineSnapshot(
-      `[Error: relations -> users: { author: r.many.posts(...) }: not enough data provided to build the relation - "from"/"to" are not defined, and no reverse relation of table "posts" with target table "users" was found]`,
-    );
+      import(`${schemasDir}/one-to-many-missing-one.zero`),
+    ).rejects.toThrow(errors.missingOneRelation);
   });
 
   test('relationships - relation-name-conflicts-column', async ({expect}) => {
     await expect(
-      import('./schemas-v1/relation-name-conflicts-column.zero'),
-    ).rejects.toThrowErrorMatchingInlineSnapshot(
-      `[Error: relations -> users: { posts: r.many.posts(...) }: relation name collides with column "posts" of table "users"]`,
+      import(`${schemasDir}/relation-name-conflicts-column.zero`),
+    ).rejects.toThrow(errors.relationNameConflictsColumn,
     );
   });
 
@@ -240,7 +239,7 @@ describe('relationships', () => {
     expect,
   }) => {
     await expect(
-      import('./schemas-v1/many-to-many-relation-name-conflicts-column.zero'),
+      import(`${schemasDir}/many-to-many-relation-name-conflicts-column.zero`),
     ).rejects.toThrowErrorMatchingInlineSnapshot(
       `[Error: drizzle-zero: Invalid relationship name for users.groups: there is already a table column with the name groups and this cannot be used as a relationship name]`,
     );
@@ -257,7 +256,7 @@ describe('relationships', () => {
 
   test('relationships - no-relations', async () => {
     const {schema: noRelationsZeroSchema} =
-      await import('./schemas-v1/no-relations.zero');
+      await import(`${schemasDir}/no-relations.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -285,7 +284,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-one self-referential', async () => {
     const {schema: oneToOneSelfZeroSchema} =
-      await import('./schemas-v1/one-to-one-self.zero');
+      await import(`${schemasDir}/one-to-one-self.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -315,7 +314,7 @@ describe('relationships', () => {
       expected.tables.users.columns.id.customType,
     );
 
-    const drizzleSchema = await import('./schemas-v1/one-to-one-self.schema');
+    const drizzleSchema = await import(`${schemasDir}/one-to-one-self.schema`);
     assertEqual(
       null as unknown as DrizzleToZeroSchema<
         typeof drizzleSchema
@@ -341,7 +340,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-one', async () => {
     const {schema: oneToOneZeroSchema} =
-      await import('./schemas-v1/one-to-one.zero');
+      await import(`${schemasDir}/one-to-one.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -390,7 +389,7 @@ describe('relationships', () => {
       expected.tables.users.columns.id.customType,
     );
 
-    const drizzleSchema = await import('./schemas-v1/one-to-one.schema');
+    const drizzleSchema = await import(`${schemasDir}/one-to-one.schema`);
     assertEqual(
       null as unknown as DrizzleToZeroSchema<
         typeof drizzleSchema
@@ -407,7 +406,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-one-subset', async () => {
     const {schema: oneToOneSubsetZeroSchema} =
-      await import('./schemas-v1/one-to-one-subset.zero');
+      await import(`${schemasDir}/one-to-one-subset.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -426,7 +425,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-one-foreign-key', async () => {
     const {schema: oneToOneForeignKeyZeroSchema} =
-      await import('./schemas-v1/one-to-one-foreign-key.zero');
+      await import(`${schemasDir}/one-to-one-foreign-key.zero`);
 
     const expectedUsers = table('users')
       .columns({
@@ -477,7 +476,7 @@ describe('relationships', () => {
     );
 
     const drizzleSchema =
-      await import('./schemas-v1/one-to-one-foreign-key.schema');
+      await import(`${schemasDir}/one-to-one-foreign-key.schema`);
     assertEqual(
       null as unknown as DrizzleToZeroSchema<
         typeof drizzleSchema
@@ -488,7 +487,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-one-2', async () => {
     const {schema: oneToOne2ZeroSchema} =
-      await import('./schemas-v1/one-to-one-2.zero');
+      await import(`${schemasDir}/one-to-one-2.zero`);
 
     const expectedUsers = table('userTable')
       .from('user')
@@ -582,7 +581,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-many', async () => {
     const {schema: oneToManyZeroSchema} =
-      await import('./schemas-v1/one-to-many.zero');
+      await import(`${schemasDir}/one-to-many.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -672,7 +671,7 @@ describe('relationships', () => {
       expected.tables.comments.columns.text.customType,
     );
 
-    const drizzleSchema = await import('./schemas-v1/one-to-many.schema');
+    const drizzleSchema = await import(`${schemasDir}/one-to-many.schema`);
     assertEqual(
       null as unknown as DrizzleToZeroSchema<
         typeof drizzleSchema
@@ -683,7 +682,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-many-named', async () => {
     const {schema: oneToManyNamedZeroSchema} =
-      await import('./schemas-v1/one-to-many-named.zero');
+      await import(`${schemasDir}/one-to-many-named.zero`);
 
     const expectedUsers = table('users')
       .columns({
@@ -752,7 +751,7 @@ describe('relationships', () => {
       expected.tables.posts.columns.reviewerId.customType,
     );
 
-    const drizzleSchema = await import('./schemas-v1/one-to-many-named.schema');
+    const drizzleSchema = await import(`${schemasDir}/one-to-many-named.schema`);
     assertEqual(
       null as unknown as DrizzleToZeroSchema<
         typeof drizzleSchema
@@ -763,7 +762,7 @@ describe('relationships', () => {
 
   test('relationships - many-to-many', async () => {
     const {schema: manyToManyZeroSchema} =
-      await import('./schemas-v1/many-to-many.zero');
+      await import(`${schemasDir}/many-to-many.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -861,7 +860,7 @@ describe('relationships', () => {
 
   test('relationships - many-to-many-self-referential-fk', async () => {
     const {schema: manyToManySelfReferentialFkZeroSchema} =
-      await import('./schemas-v1/many-to-many-self-referential-fk.zero');
+      await import(`${schemasDir}/many-to-many-self-referential-fk.zero`);
 
     const expectedDoc = table('doc')
       .columns({
@@ -940,7 +939,7 @@ describe('relationships', () => {
 
   test('relationships - many-to-many-subset', async () => {
     const {schema: manyToManySubsetZeroSchema} =
-      await import('./schemas-v1/many-to-many-subset.zero');
+      await import(`${schemasDir}/many-to-many-subset.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -962,7 +961,7 @@ describe('relationships', () => {
 
   test('relationships - many-to-many-subset-2', async () => {
     const {schema: manyToManySubset2ZeroSchema} =
-      await import('./schemas-v1/many-to-many-subset-2.zero');
+      await import(`${schemasDir}/many-to-many-subset-2.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -1019,7 +1018,7 @@ describe('relationships', () => {
 
   test('relationships - many-to-many-self-referential', async () => {
     const {schema: manyToManySelfReferentialZeroSchema} =
-      await import('./schemas-v1/many-to-many-self-referential.zero');
+      await import(`${schemasDir}/many-to-many-self-referential.zero`);
 
     const expectedUsers = table('user')
       .columns({
@@ -1081,7 +1080,7 @@ describe('relationships', () => {
 
   test('relationships - many-to-many-extended-config', async () => {
     const {schema: manyToManyExtendedConfigZeroSchema} =
-      await import('./schemas-v1/many-to-many-extended-config.zero');
+      await import(`${schemasDir}/many-to-many-extended-config.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -1185,7 +1184,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-many-casing', async () => {
     const {schema: oneToManyCasingZeroSchema} =
-      await import('./schemas-v1/one-to-many-casing.zero');
+      await import(`${schemasDir}/one-to-many-casing.zero`);
 
     const expectedUsers = table('users')
       .from('user')
@@ -1280,7 +1279,7 @@ describe('relationships', () => {
       expected.tables.posts.columns.authorId.customType,
     );
 
-    const drizzleSchema = await import('./schemas-v1/one-to-many-casing.schema');
+    const drizzleSchema = await import(`${schemasDir}/one-to-many-casing.schema`);
     assertEqual(
       null as unknown as DrizzleToZeroSchema<
         typeof drizzleSchema
@@ -1291,7 +1290,7 @@ describe('relationships', () => {
 
   test('relationships - one-to-many-parent-child', async () => {
     const {schema: oneToManyParentChildZeroSchema} =
-      await import('./schemas-v1/one-to-many-parent-child.zero');
+      await import(`${schemasDir}/one-to-many-parent-child.zero`);
 
     const expectedFilters = table('filters')
       .from('filter')
@@ -1338,7 +1337,7 @@ describe('relationships', () => {
     );
 
     const drizzleSchema =
-      await import('./schemas-v1/one-to-many-parent-child.schema');
+      await import(`${schemasDir}/one-to-many-parent-child.schema`);
     assertEqual(
       null as unknown as DrizzleToZeroSchema<
         typeof drizzleSchema
@@ -1349,7 +1348,7 @@ describe('relationships', () => {
 
   test('relationships - custom-schema', async () => {
     const {schema: customSchemaZeroSchema} =
-      await import('./schemas-v1/custom-schema.zero');
+      await import(`${schemasDir}/custom-schema.zero`);
 
     const expectedUsers = table('users')
       .from('custom.user')
@@ -1394,7 +1393,7 @@ describe('relationships', () => {
       expected.tables.users.columns.name.customType,
     );
 
-    const drizzleSchema = await import('./schemas-v1/custom-schema.schema');
+    const drizzleSchema = await import(`${schemasDir}/custom-schema.schema`);
     assertEqual(
       null as unknown as DrizzleToZeroSchema<
         typeof drizzleSchema
@@ -1405,7 +1404,7 @@ describe('relationships', () => {
 
   test('relationships - disambiguates same table name across schemas', async () => {
     const {schema: schemaCollisionZeroSchema} =
-      await import('./schemas-v1/postgres-schema-collision.zero');
+      await import(`${schemasDir}/postgres-schema-collision.zero`);
 
     const expectedAuthUsers = table('authUsers')
       .from('auth.user')
@@ -1482,3 +1481,4 @@ describe('relationships', () => {
     expectSchemaDeepEqual(schemaCollisionZeroSchema).toEqual(expected);
   });
 });
+}
