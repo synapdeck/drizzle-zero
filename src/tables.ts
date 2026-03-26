@@ -19,6 +19,8 @@ import {
   drizzleColumnTypeToZeroType,
   type DrizzleDataTypeToZeroType,
   drizzleDataTypeToZeroType,
+  type MapDrizzle1DataTypeToZero,
+  mapDrizzle1DataTypeToZero,
   postgresTypeToZeroType,
   type ZeroTypeToTypescriptType,
 } from './drizzle-to-zero';
@@ -77,6 +79,7 @@ export type ColumnsConfig<TTable extends Table> =
 
 /**
  * Maps a Drizzle column type to its corresponding Zero type.
+ * Supports both Drizzle 0.x (via column._) and 1.0 (compound dataType).
  */
 type ZeroMappedColumnType<
   TTable extends Table,
@@ -89,7 +92,11 @@ type ZeroMappedColumnType<
   columnType: keyof DrizzleColumnTypeToZeroType;
 }
   ? DrizzleColumnTypeToZeroType[CD['columnType']]
-  : DrizzleDataTypeToZeroType[CD['dataType']];
+  : CD extends {dataType: keyof DrizzleDataTypeToZeroType}
+    ? DrizzleDataTypeToZeroType[CD['dataType']]
+    : CD extends {dataType: infer DT extends string}
+      ? MapDrizzle1DataTypeToZero<DT>
+      : never;
 
 /**
  * Maps a Drizzle column to its corresponding TypeScript type in Zero.
@@ -321,17 +328,25 @@ const createZeroTableBuilder = <
         }
       }
 
-      const type =
-        drizzleColumnTypeToZeroType[
-          column.columnType as keyof typeof drizzleColumnTypeToZeroType
-        ] ??
-        drizzleDataTypeToZeroType[
-          column.dataType as keyof typeof drizzleDataTypeToZeroType
-        ] ??
-        postgresTypeToZeroType[
-          column.getSQLType() as keyof typeof postgresTypeToZeroType
-        ] ??
-        null;
+      // Drizzle 1.0 uses column.dimensions for array detection instead of PgArray columnType
+      const isArrayColumn =
+        typeof (column as any).dimensions === 'number' &&
+        (column as any).dimensions > 0;
+
+      const type = isArrayColumn
+        ? ('json' as const)
+        : (drizzleColumnTypeToZeroType[
+            column.columnType as keyof typeof drizzleColumnTypeToZeroType
+          ] ??
+          drizzleDataTypeToZeroType[
+            column.dataType as keyof typeof drizzleDataTypeToZeroType
+          ] ??
+          // Drizzle 1.0 compound dataType (e.g. 'string uuid', 'object date')
+          mapDrizzle1DataTypeToZero(column.dataType) ??
+          postgresTypeToZeroType[
+            column.getSQLType() as keyof typeof postgresTypeToZeroType
+          ] ??
+          null);
 
       if (type === null && !isColumnConfigOverride) {
         console.warn(
@@ -374,15 +389,16 @@ const createZeroTableBuilder = <
         };
       }
 
-      const schemaValue = column.enumValues
-        ? zeroEnumeration<typeof column.enumValues>()
-        : type === 'string'
-          ? zeroString()
-          : type === 'number'
-            ? zeroNumber()
-            : type === 'json'
-              ? zeroJson()
-              : zeroBoolean();
+      const schemaValue =
+        column.enumValues && !isArrayColumn
+          ? zeroEnumeration<typeof column.enumValues>()
+          : type === 'string'
+            ? zeroString()
+            : type === 'number'
+              ? zeroNumber()
+              : type === 'json'
+                ? zeroJson()
+                : zeroBoolean();
 
       const schemaValueWithFrom =
         resolvedColumnName !== key
