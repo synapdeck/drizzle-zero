@@ -343,7 +343,10 @@ const createZeroTableBuilder = <
             column.dataType as keyof typeof drizzleDataTypeToZeroType
           ] ??
           // Drizzle 1.0 compound dataType (e.g. 'string uuid', 'object date')
-          mapDrizzle1DataTypeToZero(column.dataType) ??
+          // Only try when the dataType contains a space (compound format).
+          (column.dataType.includes(' ')
+            ? mapDrizzle1DataTypeToZero(column.dataType)
+            : null) ??
           postgresTypeToZeroType[
             column.getSQLType() as keyof typeof postgresTypeToZeroType
           ] ??
