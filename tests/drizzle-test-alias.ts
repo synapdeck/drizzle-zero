@@ -2,6 +2,7 @@ import path from 'node:path';
 
 const testsDir = path.resolve(import.meta.dirname);
 const schemasV1Dir = path.join(testsDir, 'schemas-v1');
+const suitesDir = path.join(testsDir, 'suites');
 
 /**
  * Vite plugin that rewrites `drizzle-orm` imports to `drizzle-orm-v0`
@@ -17,8 +18,9 @@ export function drizzleTestAlias() {
     enforce: 'pre' as const,
     async resolveId(this: any, source: string, importer: string | undefined) {
       if (!importer || !importer.startsWith(testsDir)) return null;
-      // Don't alias v1 schemas or v1 test files
+      // Don't alias v1 schemas, shared suite files, or v1 test files
       if (importer.startsWith(schemasV1Dir)) return null;
+      if (importer.startsWith(suitesDir)) return null;
       if (importer.includes('-v1.test.ts')) return null;
       const match = source.match(/^drizzle-orm(\/.*)?$/);
       if (!match) return null;

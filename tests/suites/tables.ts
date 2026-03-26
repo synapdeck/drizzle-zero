@@ -1,0 +1,2159 @@
+import {
+  boolean,
+  enumeration,
+  json,
+  number,
+  string,
+  table,
+} from '@rocicorp/zero';
+import {beforeAll, describe, test, vi} from 'vitest';
+import type {Precision} from 'drizzle-orm/pg-core';
+import {createZeroTableBuilder, type ColumnsConfig} from '../../src';
+import {assertEqual, expectTableSchemaDeepEqual} from '../utils';
+import type {VersionConfig} from './version-config';
+
+export function defineTablesSuite({name, schemasDir, warnings}: VersionConfig) {
+  describe(`tables (${name})`, () => {
+    let d: any;
+    beforeAll(async () => {
+      d = await import(`${schemasDir}/drizzle-reexport`);
+    });
+    test('pg - basic', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        json: d.jsonb().notNull(),
+      });
+
+      const result = createZeroTableBuilder('basic', testTable, {
+        id: true,
+        name: true,
+        json: true,
+      });
+
+      const expected = table('basic')
+        .from('test')
+        .columns({
+          id: string(),
+          name: string(),
+          json: json(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+      assertEqual(
+        result.schema.columns.json.customType,
+        expected.schema.columns.json.customType,
+      );
+    });
+
+    test('pg - named fields', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text('custom_id').primaryKey(),
+        name: d.text('custom_name').notNull(),
+      });
+
+      const result = createZeroTableBuilder('named', testTable, {
+        id: true,
+        name: true,
+      });
+
+      const expected = table('named')
+        .from('test')
+        .columns({
+          id: string().from('custom_id'),
+          name: string().from('custom_name'),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+    });
+
+    test('pg - custom types', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        json: d.jsonb().$type<{foo: string}>().notNull(),
+      });
+
+      const result = createZeroTableBuilder('custom', testTable, {
+        id: string(),
+        json: true,
+      });
+
+      const expected = table('custom')
+        .from('test')
+        .columns({
+          id: string(),
+          json: json<{foo: string}>(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.json.customType,
+        expected.schema.columns.json.customType,
+      );
+    });
+
+    test('pg - optional fields', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        name: d.text(), // optional
+        description: d.text(), // optional
+        metadata: d.jsonb(), // optional
+      });
+
+      const result = createZeroTableBuilder('optional', testTable, {
+        id: true,
+        name: true,
+        description: true,
+        metadata: true,
+      });
+
+      const expected = table('optional')
+        .from('test')
+        .columns({
+          id: string(),
+          name: string().optional(),
+          description: string().optional(),
+          metadata: json().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+      assertEqual(
+        result.schema.columns.description.customType,
+        expected.schema.columns.description.customType,
+      );
+      assertEqual(
+        result.schema.columns.metadata.customType,
+        expected.schema.columns.metadata.customType,
+      );
+    });
+
+    test('pg - complex custom types', () => {
+      type UserMetadata = {
+        preferences: {
+          theme: 'light' | 'dark';
+          notifications: boolean;
+        };
+        lastLogin: string;
+      };
+
+      const testTable = d.pgTable('users', {
+        id: d.text().$type<`${string}-${string}`>().primaryKey(),
+        metadata: d.jsonb().$type<UserMetadata>().notNull(),
+        settings: d.jsonb().$type<Record<string, boolean>>(),
+        status: d.text('status', {enum: ['ASSIGNED', 'COMPLETED']}),
+      });
+
+      const result = createZeroTableBuilder('complex', testTable, {
+        id: true,
+        metadata: true,
+        settings: true,
+        status: true,
+      });
+
+      const expected = table('complex')
+        .from('users')
+        .columns({
+          id: string<`${string}-${string}`>(),
+          metadata: json<UserMetadata>(),
+          settings: json<Record<string, boolean>>().optional(),
+          status: string<'ASSIGNED' | 'COMPLETED'>().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.metadata.customType,
+        expected.schema.columns.metadata.customType,
+      );
+      assertEqual(
+        result.schema.columns.settings.customType,
+        expected.schema.columns.settings.customType,
+      );
+      assertEqual(
+        result.schema.columns.status.customType,
+        expected.schema.columns.status.customType,
+      );
+    });
+
+    test('pg - custom column type', () => {
+      const customColumnDateTimeType = d.customType<{
+        data: Date;
+        driverData: string;
+        config: {precision: Precision; withTimezone: boolean};
+      }>({
+        dataType(config) {
+          const precision =
+            config !== undefined ? ` (${config.precision})` : '';
+          const timezone =
+            config !== undefined
+              ? config.withTimezone
+                ? ' with time zone'
+                : ' without time zone'
+              : '';
+
+          return `timestamp${precision}${timezone}`;
+        },
+        fromDriver(value: string): Date {
+          return new Date(value);
+        },
+        toDriver(value: Date | SQL): string | SQL {
+          if (value && 'toISOString' in value) {
+            return value.toISOString();
+          }
+          return value;
+        },
+      });
+
+      const customColumnNumberType = d.customType<{
+        data: number;
+        driverData: string;
+        notNull: false;
+      }>({
+        dataType() {
+          return 'integer';
+        },
+      });
+
+      const customColumnEnumType = d.customType<{
+        data: 'foo' | 'bar';
+        driverData: string;
+        notNull: false;
+      }>({
+        dataType() {
+          return 'enum';
+        },
+      });
+
+      type TypeId<T> = string & {
+        __type: T;
+      };
+
+      const customTypeIdFactory = <T extends string>() =>
+        d.customType<{
+          data: TypeId<T>;
+          driverData: string;
+          notNull: false;
+        }>({
+          dataType() {
+            return 'text';
+          },
+        });
+
+      const testTable = d.pgTable('users', {
+        id: d.text().primaryKey(),
+        createdAt: customColumnDateTimeType('created_at').notNull(),
+        number: customColumnNumberType('number').notNull(),
+        enum: customColumnEnumType('enum').notNull(),
+        typeId: customTypeIdFactory<'user'>()('type_id').notNull(),
+      });
+
+      const result = createZeroTableBuilder('custom_column_type', testTable, {
+        id: true,
+        createdAt: number().from('created_at'),
+        number: true,
+        enum: true,
+        typeId: true,
+      });
+
+      const expected = table('custom_column_type')
+        .from('users')
+        .columns({
+          id: string(),
+          createdAt: number().from('created_at'),
+          number: number(),
+          enum: enumeration<'foo' | 'bar'>(),
+          typeId: string<TypeId<'user'>>().from('type_id'),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.createdAt.customType,
+        expected.schema.columns.createdAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.number.customType,
+        expected.schema.columns.number.customType,
+      );
+      assertEqual(
+        result.schema.columns.enum.customType,
+        expected.schema.columns.enum.customType,
+      );
+      assertEqual(
+        result.schema.columns.typeId.customType,
+        expected.schema.columns.typeId.customType,
+      );
+    });
+
+    test('pg - partial column selection', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        age: d.serial().notNull(),
+        metadata: d.jsonb().notNull(),
+      });
+
+      const result = createZeroTableBuilder('partial', testTable, {
+        id: true,
+        metadata: true,
+        name: false,
+        age: false,
+      });
+
+      const expected = table('partial')
+        .from('test')
+        .columns({
+          id: string(),
+          metadata: json(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+    });
+
+    test('pg - partial column selection with omit', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        age: d.serial().notNull(),
+        metadata: d.jsonb().notNull(),
+      });
+
+      const result = createZeroTableBuilder('omit', testTable, {
+        id: true,
+        name: true,
+      });
+
+      const expected = table('omit')
+        .from('test')
+        .columns({
+          id: string(),
+          name: string(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+    });
+
+    test('pg - partial column selection with omit primary key', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        age: d.serial().notNull(),
+        metadata: d.jsonb().notNull(),
+      });
+
+      const result = createZeroTableBuilder('omit', testTable, {
+        metadata: true,
+      });
+
+      const expected = table('omit')
+        .from('test')
+        .columns({
+          id: string(),
+          metadata: json(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.metadata.customType,
+        expected.schema.columns.metadata.customType,
+      );
+    });
+
+    test('pg - partial column selection with false', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        age: d.serial().notNull(),
+        metadata: d.jsonb().notNull(),
+      });
+
+      const result = createZeroTableBuilder('false', testTable, {
+        id: true,
+        metadata: true,
+        age: false,
+        name: false,
+      });
+
+      const expected = table('false')
+        .from('test')
+        .columns({
+          id: string(),
+          metadata: json(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.metadata.customType,
+        expected.schema.columns.metadata.customType,
+      );
+    });
+
+    test('pg - no column selection', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        age: d.integer().notNull(),
+        metadata: d.jsonb().notNull(),
+      });
+
+      const result = createZeroTableBuilder('no-columns', testTable, true);
+
+      const expected = table('no-columns')
+        .from('test')
+        .columns({
+          id: string(),
+          name: string(),
+          age: number(),
+          metadata: json(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+    });
+
+    test('pg - undefined column selection', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        age: d.integer().notNull(),
+        metadata: d.jsonb().notNull(),
+      });
+
+      const result = createZeroTableBuilder('no-columns', testTable);
+
+      const expected = table('no-columns')
+        .from('test')
+        .columns({
+          id: string(),
+          name: string(),
+          age: number(),
+          metadata: json(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+      assertEqual(
+        result.schema.columns.age.customType,
+        expected.schema.columns.age.customType,
+      );
+      assertEqual(
+        result.schema.columns.metadata.customType,
+        expected.schema.columns.metadata.customType,
+      );
+    });
+
+    test('pg - composite primary key', () => {
+      const testTable = d.pgTable(
+        'composite_test',
+        {
+          userId: d.text().notNull(),
+          orgId: d.text().notNull(),
+          // there is a known issue with the text column type - if there are multiple primary key columns, the type
+          // will be inferred as all of the text column types, not just the primary key columns.
+          enabled: d.boolean().notNull(),
+        },
+        t => [d.primaryKey({columns: [t.userId, t.orgId]})],
+      );
+
+      const result = createZeroTableBuilder('composite', testTable, {
+        userId: true,
+        orgId: true,
+        enabled: true,
+      });
+
+      const expected = table('composite')
+        .from('composite_test')
+        .columns({
+          userId: string(),
+          orgId: string(),
+          enabled: boolean(),
+        })
+        .primaryKey('userId', 'orgId');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.userId.customType,
+        expected.schema.columns.userId.customType,
+      );
+      assertEqual(
+        result.schema.columns.orgId.customType,
+        expected.schema.columns.orgId.customType,
+      );
+      assertEqual(
+        result.schema.columns.enabled.customType,
+        expected.schema.columns.enabled.customType,
+      );
+    });
+
+    test('pg - timestamp fields', () => {
+      const testTable = d.pgTable('events', {
+        id: d.text().primaryKey(),
+        createdAt: d.timestamp().notNull().defaultNow(),
+        updatedAt: d.timestamp(),
+        scheduledFor: d.timestamp().notNull(),
+        scheduledForTz: d.timestamp({withTimezone: true}),
+        precision: d.timestamp({precision: 2}),
+        timestampModeString: d.timestamp({mode: 'string'}),
+        timestampModeDate: d.timestamp({mode: 'date'}),
+        timestampDefault: d
+          .timestamp('timestamp_default', {
+            mode: 'string',
+            precision: 3,
+            withTimezone: true,
+          })
+          .defaultNow()
+          .notNull()
+          .$onUpdate(() => d.sql`now()`),
+      });
+
+      const result = createZeroTableBuilder('events', testTable, {
+        id: true,
+        createdAt: true,
+        updatedAt: true,
+        scheduledFor: true,
+        scheduledForTz: true,
+        precision: true,
+        timestampModeString: true,
+        timestampModeDate: true,
+        timestampDefault: true,
+      });
+
+      const expected = table('events')
+        .columns({
+          id: string(),
+          createdAt: number().optional(),
+          updatedAt: number().optional(),
+          scheduledFor: number(),
+          scheduledForTz: number().optional(),
+          precision: number().optional(),
+          timestampModeString: number().optional(),
+          timestampModeDate: number().optional(),
+          timestampDefault: number().from('timestamp_default').optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.createdAt.customType,
+        expected.schema.columns.createdAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.updatedAt.customType,
+        expected.schema.columns.updatedAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.scheduledFor.customType,
+        expected.schema.columns.scheduledFor.customType,
+      );
+      assertEqual(
+        result.schema.columns.scheduledForTz.customType,
+        expected.schema.columns.scheduledForTz.customType,
+      );
+      assertEqual(
+        result.schema.columns.precision.customType,
+        expected.schema.columns.precision.customType,
+      );
+      assertEqual(
+        result.schema.columns.timestampModeString.customType,
+        expected.schema.columns.timestampModeString.customType,
+      );
+      assertEqual(
+        result.schema.columns.timestampModeDate.customType,
+        expected.schema.columns.timestampModeDate.customType,
+      );
+      assertEqual(
+        result.schema.columns.timestampDefault.customType,
+        expected.schema.columns.timestampDefault.customType,
+      );
+    });
+
+    test('pg - time fields', () => {
+      const testTable = d.pgTable('events', {
+        id: d.text().primaryKey(),
+        startsAt: d.time().notNull(),
+        startsAtTz: d.time({withTimezone: true}),
+        preciseTime: d.time({precision: 2}),
+      });
+
+      const result = createZeroTableBuilder('events', testTable, {
+        id: true,
+        startsAt: true,
+        startsAtTz: true,
+        preciseTime: true,
+      });
+
+      const expected = table('events')
+        .columns({
+          id: string(),
+          startsAt: number(),
+          startsAtTz: number().optional(),
+          preciseTime: number().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.startsAt.customType,
+        expected.schema.columns.startsAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.startsAtTz.customType,
+        expected.schema.columns.startsAtTz.customType,
+      );
+      assertEqual(
+        result.schema.columns.preciseTime.customType,
+        expected.schema.columns.preciseTime.customType,
+      );
+    });
+
+    test('pg - custom time SQL type fallback', () => {
+      const customTimeType = d.customType<{
+        data: number;
+        driverData: string;
+        notNull: false;
+      }>({
+        dataType() {
+          return 'time';
+        },
+      });
+
+      const customTimeTzType = d.customType<{
+        data: number;
+        driverData: string;
+        notNull: false;
+      }>({
+        dataType() {
+          return 'timetz';
+        },
+      });
+
+      const customTimeWithoutTzType = d.customType<{
+        data: number;
+        driverData: string;
+        notNull: false;
+      }>({
+        dataType() {
+          return 'time without time zone';
+        },
+      });
+
+      const testTable = d.pgTable('events', {
+        id: d.text().primaryKey(),
+        startsAt: customTimeType('starts_at').notNull(),
+        startsAtTz: customTimeTzType('starts_at_tz')
+          .notNull()
+          .default(d.sql`current_time`),
+        endsAt: customTimeWithoutTzType('ends_at'),
+      });
+
+      const result = createZeroTableBuilder('events', testTable, {
+        id: true,
+        startsAt: true,
+        startsAtTz: true,
+        endsAt: true,
+      });
+
+      const expected = table('events')
+        .columns({
+          id: string(),
+          startsAt: number().from('starts_at'),
+          startsAtTz: number().from('starts_at_tz').optional(),
+          endsAt: number().from('ends_at').optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.startsAt.customType,
+        expected.schema.columns.startsAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.startsAtTz.customType,
+        expected.schema.columns.startsAtTz.customType,
+      );
+      assertEqual(
+        result.schema.columns.endsAt.customType,
+        expected.schema.columns.endsAt.customType,
+      );
+    });
+
+    test('pg - custom column mapping', () => {
+      const testTable = d.pgTable('users', {
+        id: d.text().primaryKey(),
+        firstName: d.text('first_name').notNull(),
+        lastName: d.text('last_name').notNull(),
+        profileData: d.jsonb('profile_data').$type<{
+          bio: string;
+          avatar: string;
+        }>(),
+      });
+
+      const result = createZeroTableBuilder('users', testTable, {
+        id: true,
+        firstName: true,
+        lastName: true,
+        profileData: true,
+      });
+
+      const expected = table('users')
+        .columns({
+          id: string(),
+          firstName: string().from('first_name'),
+          lastName: string().from('last_name'),
+          profileData: json<{bio: string; avatar: string}>()
+            .from('profile_data')
+            .optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.firstName.customType,
+        expected.schema.columns.firstName.customType,
+      );
+      assertEqual(
+        result.schema.columns.lastName.customType,
+        expected.schema.columns.lastName.customType,
+      );
+      assertEqual(
+        result.schema.columns.profileData.customType,
+        expected.schema.columns.profileData.customType,
+      );
+    });
+
+    test('pg - enum field', () => {
+      const roleEnum = d.pgEnum('user_role', ['admin', 'user', 'guest']);
+
+      const testTable = d.pgTable('users', {
+        id: d.text().primaryKey(),
+        role: roleEnum().notNull(),
+        roleWithDefault: roleEnum().default('user').notNull(),
+        backupRole: roleEnum(),
+      });
+
+      const result = createZeroTableBuilder('enum', testTable, {
+        id: true,
+        role: true,
+        roleWithDefault: true,
+        backupRole: true,
+      });
+
+      const expected = table('enum')
+        .from('users')
+        .columns({
+          id: string(),
+          role: enumeration<'admin' | 'user' | 'guest'>(),
+          roleWithDefault: enumeration<'admin' | 'user' | 'guest'>().optional(),
+          backupRole: enumeration<'admin' | 'user' | 'guest'>().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.role.customType,
+        expected.schema.columns.role.customType,
+      );
+      assertEqual(
+        result.schema.columns.roleWithDefault.customType,
+        expected.schema.columns.roleWithDefault.customType,
+      );
+      assertEqual(
+        result.schema.columns.backupRole.customType,
+        expected.schema.columns.backupRole.customType,
+      );
+    });
+
+    test('pg - simple enum field', () => {
+      const moodEnum = d.pgEnum('mood_type', ['happy', 'sad', 'ok']);
+
+      const testTable = d.pgTable('users', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        mood: moodEnum().notNull(),
+      });
+
+      const result = createZeroTableBuilder('users', testTable, {
+        id: true,
+        name: true,
+        mood: true,
+      });
+
+      const expected = table('users')
+        .columns({
+          id: string(),
+          name: string(),
+          mood: enumeration<'happy' | 'sad' | 'ok'>(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+      assertEqual(
+        result.schema.columns.mood.customType,
+        expected.schema.columns.mood.customType,
+      );
+    });
+
+    test('pg - all supported data types', () => {
+      const statusEnum = d.pgEnum('status_type', [
+        'active',
+        'inactive',
+        'pending',
+      ]);
+
+      const testTable = d.pgTable('all_types', {
+        // Integer types
+        id: d.text('id').primaryKey(),
+        smallint: d.smallint('smallint').notNull(),
+        integer: d.integer('integer').notNull(),
+        bigint: d.bigint('bigint', {mode: 'bigint'}).notNull(),
+        bigint_number: d.bigint('bigint_number', {mode: 'number'}).notNull(),
+
+        // Serial types
+        smallSerial: d.smallserial('smallserial').notNull(),
+        regularSerial: d.serial('regular_serial').notNull(),
+        bigSerial: d.bigserial('bigserial', {mode: 'number'}).notNull(),
+
+        // Arbitrary precision types
+        numeric: d.numeric('numeric', {precision: 10, scale: 2}).notNull(),
+        decimal: d.numeric('decimal', {precision: 10, scale: 2}).notNull(),
+
+        // Floating-point types
+        real: d.real('real').notNull(),
+        doublePrecision: d.doublePrecision('double_precision').notNull(),
+
+        // String types
+        name: d.text().notNull(),
+        code: d.char().notNull(),
+        identifier: d.uuid().notNull(),
+        description: d.varchar().notNull(),
+        isActive: d.boolean().notNull(),
+        startsAt: d.time().notNull(),
+        startsAtTz: d.time({withTimezone: true}).notNull(),
+        createdAt: d.timestamp().notNull(),
+        updatedAt: d.timestamp({withTimezone: true}).notNull(),
+        birthDate: d.date().notNull(),
+        dateString: d.date({mode: 'string'}).notNull(),
+        metadata: d.jsonb().notNull(),
+        settings: d.json().$type<{theme: string; fontSize: number}>().notNull(),
+        status: statusEnum().notNull(),
+
+        // Optional variants
+        optionalSmallint: d.smallint('optional_smallint'),
+        optionalInteger: d.integer('optional_integer'),
+        optionalBigint: d.bigint('optional_bigint', {mode: 'number'}),
+        optionalNumeric: d.numeric('optional_numeric', {
+          precision: 10,
+          scale: 2,
+        }),
+        optionalDecimal: d.numeric('optional_decimal', {
+          precision: 10,
+          scale: 2,
+        }),
+        optionalReal: d.real('optional_real'),
+        optionalDoublePrecision: d.doublePrecision('optional_double_precision'),
+        optionalText: d.text('optional_text'),
+        optionalBoolean: d.boolean('optional_boolean'),
+        optionalTime: d.time('optional_time'),
+        optionalTimestamp: d.timestamp('optional_timestamp'),
+        optionalDate: d.date('optional_date'),
+        optionalJson: d.jsonb('optional_json'),
+        optionalEnum: statusEnum('optional_enum'),
+      });
+
+      const result = createZeroTableBuilder('all_types', testTable, {
+        id: true,
+        smallint: true,
+        integer: true,
+        bigint: true,
+        bigint_number: true,
+        smallSerial: true,
+        regularSerial: true,
+        bigSerial: true,
+        numeric: true,
+        decimal: true,
+        real: true,
+        doublePrecision: true,
+        name: true,
+        code: true,
+        identifier: true,
+        description: true,
+        isActive: true,
+        startsAt: true,
+        startsAtTz: true,
+        createdAt: true,
+        updatedAt: true,
+        birthDate: true,
+        dateString: true,
+        metadata: true,
+        settings: true,
+        status: true,
+        optionalSmallint: true,
+        optionalInteger: true,
+        optionalBigint: true,
+        optionalNumeric: true,
+        optionalDecimal: true,
+        optionalReal: true,
+        optionalDoublePrecision: true,
+        optionalText: true,
+        optionalBoolean: true,
+        optionalTime: true,
+        optionalTimestamp: true,
+        optionalDate: true,
+        optionalJson: true,
+        optionalEnum: true,
+      });
+
+      const expected = table('all_types')
+        .columns({
+          id: string(),
+          smallint: number(),
+          integer: number(),
+          bigint: number(),
+          bigint_number: number(),
+          smallSerial: number().from('smallserial').optional(),
+          regularSerial: number().from('regular_serial').optional(),
+          bigSerial: number().from('bigserial').optional(),
+          numeric: number(),
+          decimal: number(),
+          real: number(),
+          doublePrecision: number().from('double_precision'),
+          name: string(),
+          code: string(),
+          identifier: string(),
+          description: string(),
+          isActive: boolean(),
+          startsAt: number(),
+          startsAtTz: number(),
+          createdAt: number(),
+          updatedAt: number(),
+          birthDate: number(),
+          dateString: number(),
+          metadata: json(),
+          settings: json<{theme: string; fontSize: number}>(),
+          status: enumeration<'active' | 'inactive' | 'pending'>(),
+          optionalSmallint: number().optional().from('optional_smallint'),
+          optionalInteger: number().optional().from('optional_integer'),
+          optionalBigint: number().optional().from('optional_bigint'),
+          optionalNumeric: number().optional().from('optional_numeric'),
+          optionalDecimal: number().optional().from('optional_decimal'),
+          optionalReal: number().optional().from('optional_real'),
+          optionalDoublePrecision: number()
+            .optional()
+            .from('optional_double_precision'),
+          optionalText: string().optional().from('optional_text'),
+          optionalBoolean: boolean().optional().from('optional_boolean'),
+          optionalTime: number().optional().from('optional_time'),
+          optionalTimestamp: number().optional().from('optional_timestamp'),
+          optionalDate: number().optional().from('optional_date'),
+          optionalJson: json().optional().from('optional_json'),
+          optionalEnum: enumeration<'active' | 'inactive' | 'pending'>()
+            .optional()
+            .from('optional_enum'),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.smallint.customType,
+        expected.schema.columns.smallint.customType,
+      );
+      assertEqual(
+        result.schema.columns.integer.customType,
+        expected.schema.columns.integer.customType,
+      );
+      assertEqual(
+        result.schema.columns.bigint.customType,
+        expected.schema.columns.bigint.customType,
+      );
+      assertEqual(
+        result.schema.columns.bigint_number.customType,
+        expected.schema.columns.bigint_number.customType,
+      );
+      assertEqual(
+        result.schema.columns.smallSerial.customType,
+        expected.schema.columns.smallSerial.customType,
+      );
+      assertEqual(
+        result.schema.columns.regularSerial.customType,
+        expected.schema.columns.regularSerial.customType,
+      );
+      assertEqual(
+        result.schema.columns.bigSerial.customType,
+        expected.schema.columns.bigSerial.customType,
+      );
+      assertEqual(
+        result.schema.columns.numeric.customType,
+        expected.schema.columns.numeric.customType,
+      );
+      assertEqual(
+        result.schema.columns.decimal.customType,
+        expected.schema.columns.decimal.customType,
+      );
+      assertEqual(
+        result.schema.columns.real.customType,
+        expected.schema.columns.real.customType,
+      );
+      assertEqual(
+        result.schema.columns.doublePrecision.customType,
+        expected.schema.columns.doublePrecision.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+      assertEqual(
+        result.schema.columns.code.customType,
+        expected.schema.columns.code.customType,
+      );
+      assertEqual(
+        result.schema.columns.identifier.customType,
+        expected.schema.columns.identifier.customType,
+      );
+      assertEqual(
+        result.schema.columns.description.customType,
+        expected.schema.columns.description.customType,
+      );
+      assertEqual(
+        result.schema.columns.isActive.customType,
+        expected.schema.columns.isActive.customType,
+      );
+      assertEqual(
+        result.schema.columns.startsAt.customType,
+        expected.schema.columns.startsAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.startsAtTz.customType,
+        expected.schema.columns.startsAtTz.customType,
+      );
+      assertEqual(
+        result.schema.columns.createdAt.customType,
+        expected.schema.columns.createdAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.updatedAt.customType,
+        expected.schema.columns.updatedAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.birthDate.customType,
+        expected.schema.columns.birthDate.customType,
+      );
+      assertEqual(
+        result.schema.columns.dateString.customType,
+        expected.schema.columns.dateString.customType,
+      );
+      assertEqual(
+        result.schema.columns.metadata.customType,
+        expected.schema.columns.metadata.customType,
+      );
+      assertEqual(
+        result.schema.columns.settings.customType,
+        expected.schema.columns.settings.customType,
+      );
+      assertEqual(
+        result.schema.columns.status.customType,
+        expected.schema.columns.status.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalSmallint.customType,
+        expected.schema.columns.optionalSmallint.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalInteger.customType,
+        expected.schema.columns.optionalInteger.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalBigint.customType,
+        expected.schema.columns.optionalBigint.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalNumeric.customType,
+        expected.schema.columns.optionalNumeric.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalDecimal.customType,
+        expected.schema.columns.optionalDecimal.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalReal.customType,
+        expected.schema.columns.optionalReal.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalDoublePrecision.customType,
+        expected.schema.columns.optionalDoublePrecision.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalText.customType,
+        expected.schema.columns.optionalText.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalBoolean.customType,
+        expected.schema.columns.optionalBoolean.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalTime.customType,
+        expected.schema.columns.optionalTime.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalTimestamp.customType,
+        expected.schema.columns.optionalTimestamp.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalDate.customType,
+        expected.schema.columns.optionalDate.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalJson.customType,
+        expected.schema.columns.optionalJson.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalEnum.customType,
+        expected.schema.columns.optionalEnum.customType,
+      );
+    });
+
+    test('pg - override column json type', () => {
+      const testTable = d.pgTable('metrics', {
+        id: d.text().primaryKey(),
+        metadata: d.jsonb().notNull(),
+      });
+
+      const result = createZeroTableBuilder('override', testTable, {
+        id: true,
+        metadata: json<{amount: number; currency: string}>().optional(),
+      });
+
+      const expected = table('override')
+        .from('metrics')
+        .columns({
+          id: string(),
+          metadata: json<{amount: number; currency: string}>().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.metadata.customType,
+        expected.schema.columns.metadata.customType,
+      );
+    });
+
+    test('pg - snake case', () => {
+      const testTable = d.pgTable('users', {
+        id: d.text().primaryKey(),
+        createdAt: d.timestamp().notNull(),
+        updatedAt: d.timestamp().notNull(),
+      });
+
+      const result = createZeroTableBuilder(
+        'users',
+        testTable,
+        {
+          id: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        false,
+        'snake_case',
+      );
+
+      const expected = table('users')
+        .columns({
+          id: string(),
+          createdAt: number().from('created_at'),
+          updatedAt: number().from('updated_at'),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.createdAt.customType,
+        expected.schema.columns.createdAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.updatedAt.customType,
+        expected.schema.columns.updatedAt.customType,
+      );
+    });
+
+    test('pg - compound primary key', () => {
+      const testTable = d.pgTable(
+        'order_items',
+        {
+          orderId: d.text('order_id').notNull(),
+          productId: d.text('product_id').notNull(),
+          quantity: d.integer().notNull(),
+          price: d.numeric().notNull(),
+        },
+        t => [d.primaryKey({columns: [t.orderId, t.productId]})],
+      );
+
+      const result = createZeroTableBuilder('order_items', testTable, {
+        orderId: true,
+        productId: true,
+        quantity: true,
+        price: true,
+      });
+
+      const expected = table('order_items')
+        .columns({
+          orderId: string().from('order_id'),
+          productId: string().from('product_id'),
+          quantity: number(),
+          price: number(),
+        })
+        .primaryKey('orderId', 'productId');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.orderId.customType,
+        expected.schema.columns.orderId.customType,
+      );
+      assertEqual(
+        result.schema.columns.productId.customType,
+        expected.schema.columns.productId.customType,
+      );
+      assertEqual(
+        result.schema.columns.quantity.customType,
+        expected.schema.columns.quantity.customType,
+      );
+      assertEqual(
+        result.schema.columns.price.customType,
+        expected.schema.columns.price.customType,
+      );
+    });
+
+    test('pg - default values', () => {
+      const testTable = d.pgTable('items', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull().default('unnamed'),
+        isActive: d.boolean().notNull().default(true),
+        score: d.integer().notNull().default(0),
+        optionalScore: d.integer().default(0),
+        currentDateWithRuntimeDefault: d
+          .text()
+          .notNull()
+          .$default(() => new Date().toISOString()),
+        optionalCurrentDateWithRuntimeDefault: d
+          .text()
+          .$default(() => new Date().toISOString()),
+      });
+
+      const result = createZeroTableBuilder('items', testTable, {
+        id: true,
+        name: true,
+        isActive: true,
+        score: true,
+        optionalScore: true,
+        currentDateWithRuntimeDefault: true,
+        optionalCurrentDateWithRuntimeDefault: true,
+      });
+
+      const expected = table('items')
+        .columns({
+          id: string(),
+          name: string().optional(),
+          isActive: boolean().optional(),
+          score: number().optional(),
+          optionalScore: number().optional(),
+          currentDateWithRuntimeDefault: string().optional(),
+          optionalCurrentDateWithRuntimeDefault: string().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+      assertEqual(
+        result.schema.columns.isActive.customType,
+        expected.schema.columns.isActive.customType,
+      );
+      assertEqual(
+        result.schema.columns.score.customType,
+        expected.schema.columns.score.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalScore.customType,
+        expected.schema.columns.optionalScore.customType,
+      );
+      assertEqual(
+        result.schema.columns.currentDateWithRuntimeDefault.customType,
+        expected.schema.columns.currentDateWithRuntimeDefault.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalCurrentDateWithRuntimeDefault.customType,
+        expected.schema.columns.optionalCurrentDateWithRuntimeDefault
+          .customType,
+      );
+    });
+
+    test('pg - mixed required and optional json fields', () => {
+      type ComplexMetadata = {
+        required: {
+          features: string[];
+        };
+        optional?: {
+          preferences: Record<string, string>;
+          lastAccessed?: string;
+        };
+      };
+
+      const testTable = d.pgTable('configs', {
+        id: d.text().primaryKey(),
+        requiredJson: d.jsonb().$type<{key: string}>().notNull(),
+        optionalJson: d.jsonb().$type<ComplexMetadata>(),
+        mixedJson: d
+          .json()
+          .$type<{required: number; optional?: string}>()
+          .notNull(),
+      });
+
+      const result = createZeroTableBuilder('configs', testTable, {
+        id: true,
+        requiredJson: true,
+        optionalJson: true,
+        mixedJson: true,
+      });
+
+      const expected = table('configs')
+        .columns({
+          id: string(),
+          requiredJson: json<{key: string}>(),
+          optionalJson: json<ComplexMetadata>().optional(),
+          mixedJson: json<{required: number; optional?: string}>(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.requiredJson.customType,
+        expected.schema.columns.requiredJson.customType,
+      );
+      assertEqual(
+        result.schema.columns.optionalJson.customType,
+        expected.schema.columns.optionalJson.customType,
+      );
+      assertEqual(
+        result.schema.columns.mixedJson.customType,
+        expected.schema.columns.mixedJson.customType,
+      );
+    });
+
+    test('pg - custom column selection with type overrides', () => {
+      const testTable = d.pgTable('products', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+        description: d.text(),
+        metadata: d.jsonb().$type<Record<string, unknown>>(),
+      });
+
+      const result = createZeroTableBuilder('products', testTable, {
+        id: true,
+        name: string<'typed-value'>(),
+        description: string<'typed-value-2'>().optional(),
+        metadata: json<{category: string; tags: string[]}>().optional(),
+      });
+
+      const expected = table('products')
+        .columns({
+          id: string(),
+          name: string<'typed-value'>(),
+          description: string<'typed-value-2'>().optional(),
+          metadata: json<{category: string; tags: string[]}>().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+      assertEqual(
+        result.schema.columns.description.customType,
+        expected.schema.columns.description.customType,
+      );
+      assertEqual(
+        result.schema.columns.metadata.customType,
+        expected.schema.columns.metadata.customType,
+      );
+    });
+
+    test('pg - override enum column', () => {
+      const enumType = d.pgEnum('status', ['active', 'inactive', 'pending']);
+
+      const testTable = d.pgTable('products', {
+        id: d.text().primaryKey(),
+        status: enumType('enum_status').notNull(),
+      });
+
+      const result = createZeroTableBuilder('products', testTable, {
+        id: true,
+        status: enumeration<'active' | 'inactive'>().from('enum_status'),
+      });
+
+      const expected = table('products')
+        .columns({
+          id: string(),
+          status: enumeration<'active' | 'inactive'>().from('enum_status'),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.status.customType,
+        expected.schema.columns.status.customType,
+      );
+    });
+
+    test('pg - custom schema', () => {
+      const customSchema = d.pgSchema('schema1');
+
+      const testTable = customSchema.table('customer', {
+        id: d.text().primaryKey(),
+        name: d.text().notNull(),
+      });
+
+      const result = createZeroTableBuilder('customKey', testTable, {
+        id: true,
+        name: true,
+      });
+
+      const expected = table('customKey')
+        .from('schema1.customer')
+        .columns({
+          id: string(),
+          name: string(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+    });
+
+    test('pg - custom schema with override', () => {
+      const customSchema = d.pgSchema('custom_schema');
+
+      const testTable = customSchema.table('products', {
+        id: d.text('custom_id').primaryKey(),
+        name: d.text('custom_name').notNull(),
+      });
+
+      const result = createZeroTableBuilder('testTable', testTable, {
+        id: true,
+        name: string<'new-name'>(),
+      });
+
+      const expected = table('testTable')
+        .from('custom_schema.products')
+        .columns({
+          id: string().from('custom_id'),
+          name: string<'new-name'>(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+    });
+
+    test('pg - custom schema with from', () => {
+      const customSchema = d.pgSchema('custom_schema');
+
+      const testTable = customSchema.table('products', {
+        id: d.text('custom_id').primaryKey(),
+        name: d.text('custom_name').notNull(),
+      });
+
+      const result = createZeroTableBuilder('testTable', testTable, {
+        id: true,
+        name: true,
+      });
+
+      const expected = table('testTable')
+        .from('custom_schema.products')
+        .columns({
+          id: string().from('custom_id'),
+          name: string().from('custom_name'),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.name.customType,
+        expected.schema.columns.name.customType,
+      );
+    });
+
+    test('pg - column name conversion with explicit names', () => {
+      // Create a table with explicit snake_case column names
+      const testTable = d.pgTable('snake_case_table', {
+        id: d.text('user_id').primaryKey(),
+        firstName: d.text('first_name').notNull(),
+        lastName: d.text('last_name').notNull(),
+        createdAt: d.timestamp('created_at').notNull(),
+        updatedAt: d.timestamp('updated_at'),
+      });
+
+      const result = createZeroTableBuilder(
+        'camel_conversion',
+        testTable,
+        {
+          id: true,
+          firstName: true,
+          lastName: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        false,
+        'camelCase',
+      );
+
+      const expected = table('camel_conversion')
+        .from('snake_case_table')
+        .columns({
+          id: string().from('user_id'),
+          firstName: string().from('first_name'),
+          lastName: string().from('last_name'),
+          createdAt: number().from('created_at'),
+          updatedAt: number().from('updated_at').optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+      assertEqual(
+        result.schema.columns.id.customType,
+        expected.schema.columns.id.customType,
+      );
+      assertEqual(
+        result.schema.columns.firstName.customType,
+        expected.schema.columns.firstName.customType,
+      );
+      assertEqual(
+        result.schema.columns.lastName.customType,
+        expected.schema.columns.lastName.customType,
+      );
+      assertEqual(
+        result.schema.columns.createdAt.customType,
+        expected.schema.columns.createdAt.customType,
+      );
+      assertEqual(
+        result.schema.columns.updatedAt.customType,
+        expected.schema.columns.updatedAt.customType,
+      );
+    });
+
+    test('pg - invalid column type', ({expect}) => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        invalid: d.text().notNull(),
+      });
+
+      expect(() =>
+        createZeroTableBuilder('test', testTable, {
+          id: true,
+          invalid: 'someinvalidtype',
+        } as unknown as ColumnsConfig<typeof testTable>),
+      ).toThrowErrorMatchingInlineSnapshot(
+        `[Error: drizzle-zero: Invalid column config for column invalid - expected boolean or ColumnBuilder but was string]`,
+      );
+    });
+
+    test('pg - invalid column selection', ({expect}) => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        invalid: d.text().notNull(),
+      });
+
+      expect(() =>
+        createZeroTableBuilder('test', testTable, {
+          id: true,
+          invalid: 'someinvalidtype',
+        } as unknown as ColumnsConfig<typeof testTable>),
+      ).toThrowErrorMatchingInlineSnapshot(
+        `[Error: drizzle-zero: Invalid column config for column invalid - expected boolean or ColumnBuilder but was string]`,
+      );
+    });
+
+    test('pg - array type', () => {
+      const enumType = d.pgEnum('status', ['active', 'inactive', 'pending']);
+
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        textArray: d.text().array(),
+        intArray: d.integer().array().notNull(),
+        boolArray: d.boolean().array(),
+        numericArray: d.numeric().array(),
+        uuidArray: d.uuid().array(),
+        jsonbArray: d.jsonb().array().$type<{id: string; name: string}[]>(),
+        enumArray: enumType().array(),
+        matrix: d.integer().array().array(),
+      });
+
+      const result = createZeroTableBuilder('test', testTable);
+
+      const expected = table('test')
+        .columns({
+          id: string(),
+          textArray: json<string[]>().optional(),
+          intArray: json<number[]>(),
+          boolArray: json<boolean[]>().optional(),
+          numericArray: json<string[]>().optional(),
+          uuidArray: json<string[]>().optional(),
+          jsonbArray: json<{id: string; name: string}[]>().optional(),
+          enumArray: json<('active' | 'inactive' | 'pending')[]>().optional(),
+          matrix: json<number[][]>().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+
+      assertEqual(
+        result.schema.columns.textArray.customType,
+        expected.schema.columns.textArray.customType,
+      );
+      assertEqual(
+        result.schema.columns.intArray.customType,
+        expected.schema.columns.intArray.customType,
+      );
+      assertEqual(
+        result.schema.columns.boolArray.customType,
+        expected.schema.columns.boolArray.customType,
+      );
+      assertEqual(
+        result.schema.columns.numericArray.customType,
+        expected.schema.columns.numericArray.customType,
+      );
+      assertEqual(
+        result.schema.columns.uuidArray.customType,
+        expected.schema.columns.uuidArray.customType,
+      );
+      assertEqual(
+        result.schema.columns.jsonbArray.customType,
+        expected.schema.columns.jsonbArray.customType,
+      );
+      assertEqual(
+        result.schema.columns.enumArray.customType,
+        expected.schema.columns.enumArray.customType,
+      );
+      assertEqual(
+        result.schema.columns.matrix.customType,
+        expected.schema.columns.matrix.customType,
+      );
+    });
+
+    test('pg - array types with custom types', () => {
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        emails: d.text().array().$type<`${string}@${string}`[]>().notNull(),
+        customNumbers: d.integer().array().$type<1 | 2 | 3[]>(),
+      });
+
+      const result = createZeroTableBuilder('test', testTable, {
+        id: true,
+        emails: true,
+        customNumbers: true,
+      });
+
+      const expected = table('test')
+        .columns({
+          id: string(),
+          emails: json<`${string}@${string}`[]>(),
+          customNumbers: json<1 | 2 | 3[]>().optional(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+
+      assertEqual(
+        result.schema.columns.emails.customType,
+        expected.schema.columns.emails.customType,
+      );
+      assertEqual(
+        result.schema.columns.customNumbers.customType,
+        expected.schema.columns.customNumbers.customType,
+      );
+    });
+
+    test('pg - interval types', ({expect}) => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        interval: d.interval().notNull(),
+      });
+
+      createZeroTableBuilder('test', testTable, {
+        id: true,
+        interval: true,
+      });
+
+      // Should warn about unsupported interval types but not throw
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(warnings.interval),
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('pg - cidr types', ({expect}) => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        cidr: d.cidr().notNull(),
+      });
+
+      createZeroTableBuilder('test', testTable, {
+        id: true,
+        cidr: true,
+      });
+
+      // Should warn about unsupported cidr types but not throw
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(warnings.cidr),
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('pg - macaddr types', ({expect}) => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        macaddr: d.macaddr().notNull(),
+      });
+
+      createZeroTableBuilder('test', testTable, {
+        id: true,
+        macaddr: true,
+      });
+
+      // Should warn about unsupported macaddr types but not throw
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(warnings.macaddr),
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('pg - inet types', ({expect}) => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        inet: d.inet().notNull(),
+      });
+
+      createZeroTableBuilder('test', testTable, {
+        id: true,
+        inet: true,
+      });
+
+      // Should warn about unsupported inet types but not throw
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(warnings.inet),
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('pg - point types', ({expect}) => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        point: d.point().notNull(),
+      });
+
+      createZeroTableBuilder('test', testTable, {
+        id: true,
+        point: true,
+      });
+
+      // Should warn about unsupported point types but not throw
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(warnings.point),
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('pg - line types', ({expect}) => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        line: d.line().notNull(),
+      });
+
+      createZeroTableBuilder('test', testTable, {
+        id: true,
+        line: true,
+      });
+
+      // Should warn about unsupported line types but not throw
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(warnings.line),
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('pg - geometry types', ({expect}) => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const testTable = d.pgTable('test', {
+        id: d.text().primaryKey(),
+        location: d
+          .geometry('location', {
+            type: 'point',
+            mode: 'xy',
+            srid: 4326,
+          })
+          .notNull(),
+      });
+
+      createZeroTableBuilder('test', testTable, {
+        id: true,
+        location: true,
+      });
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining(warnings.geometry),
+      );
+
+      consoleSpy.mockRestore();
+    });
+
+    test('pg - primary key with serial default should not be optional', () => {
+      const testTable = d.pgTable('test', {
+        id: d.serial('id').primaryKey(),
+        name: d.text().notNull(),
+      });
+
+      const result = createZeroTableBuilder('test', testTable, {
+        id: true,
+        name: true,
+      });
+
+      const expected = table('test')
+        .columns({
+          id: number(),
+          name: string(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+    });
+
+    test('pg - primary key with uuid defaultRandom should not be optional', () => {
+      const testTable = d.pgTable('test', {
+        id: d.uuid('id').primaryKey().defaultRandom(),
+        name: d.text().notNull(),
+      });
+
+      const result = createZeroTableBuilder('test', testTable, {
+        id: true,
+        name: true,
+      });
+
+      const expected = table('test')
+        .columns({
+          id: string(),
+          name: string(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+    });
+
+    test('pg - primary key with sql default should not be optional', () => {
+      const testTable = d.pgTable('test', {
+        id: d
+          .uuid('id')
+          .primaryKey()
+          .default(d.sql`gen_random_uuid()`),
+        name: d.text().notNull(),
+      });
+
+      const result = createZeroTableBuilder('test', testTable, {
+        id: true,
+        name: true,
+      });
+
+      const expected = table('test')
+        .columns({
+          id: string(),
+          name: string(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+    });
+
+    test('pg - composite primary key with defaults should not be optional', () => {
+      const testTable = d.pgTable(
+        'test',
+        {
+          tenantId: d.text('tenant_id').notNull(),
+          id: d.serial('id').notNull(),
+          name: d.text().notNull(),
+        },
+        t => [d.primaryKey({columns: [t.tenantId, t.id]})],
+      );
+
+      const result = createZeroTableBuilder('test', testTable, {
+        tenantId: true,
+        id: true,
+        name: true,
+      });
+
+      const expected = table('test')
+        .columns({
+          tenantId: string().from('tenant_id'),
+          id: number(),
+          name: string(),
+        })
+        .primaryKey('tenantId', 'id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+    });
+
+    test('pg - timestamp primary key with defaultNow should not be optional', () => {
+      const testTable = d.pgTable('test', {
+        id: d.timestamp('id').primaryKey().defaultNow(),
+        name: d.text().notNull(),
+      });
+
+      const result = createZeroTableBuilder('test', testTable, {
+        id: true,
+        name: true,
+      });
+
+      const expected = table('test')
+        .columns({
+          id: number(),
+          name: string(),
+        })
+        .primaryKey('id');
+
+      expectTableSchemaDeepEqual(result.build()).toEqual(expected.build());
+    });
+
+    describe('default value warnings', () => {
+      test('pg - should warn for columns with database defaults when suppressDefaultsWarning is not set', ({
+        expect,
+      }) => {
+        const consoleSpy = vi
+          .spyOn(console, 'warn')
+          .mockImplementation(() => {});
+
+        const tableName = `test_defaults_warn_${name}`;
+        const testTable = d.pgTable(tableName, {
+          id: d.text().primaryKey(),
+          name: d.text().notNull().default('unnamed'),
+        });
+
+        createZeroTableBuilder(tableName, testTable, {
+          id: true,
+          name: true,
+        });
+
+        expect(consoleSpy).toHaveBeenCalledWith(
+          expect.stringContaining(
+            `⚠️ drizzle-zero: Column ${tableName}.name uses a database default`,
+          ),
+        );
+
+        consoleSpy.mockRestore();
+      });
+
+      test('pg - should not warn for columns with database defaults when suppressDefaultsWarning is true', ({
+        expect,
+      }) => {
+        const consoleSpy = vi
+          .spyOn(console, 'warn')
+          .mockImplementation(() => {});
+
+        const suppressedTableName = `test_defaults_suppressed_${name}`;
+        const testTable = d.pgTable(suppressedTableName, {
+          id: d.text().primaryKey(),
+          name: d.text().notNull().default('unnamed'),
+        });
+
+        createZeroTableBuilder(
+          suppressedTableName,
+          testTable,
+          {
+            id: true,
+            name: true,
+          },
+          undefined, // debug
+          undefined, // casing
+          true, // suppressDefaultsWarning
+        );
+
+        expect(consoleSpy).not.toHaveBeenCalled();
+
+        consoleSpy.mockRestore();
+      });
+    });
+
+    test('pg - no primary key', ({expect}) => {
+      const testTable = d.pgTable('test', {
+        id: d.text(),
+      });
+
+      expect(() =>
+        createZeroTableBuilder('test', testTable, {
+          id: true,
+        }),
+      ).toThrowErrorMatchingInlineSnapshot(
+        `[Error: drizzle-zero: No primary keys found in table - test. Did you forget to define a primary key?]`,
+      );
+    });
+
+    test('pg - fail if table is not pg', ({expect}) => {
+      const testTable = d.mysqlTable('test', {
+        id: d.textMysql().primaryKey(),
+        name: d.textMysql(),
+      });
+
+      expect(() =>
+        createZeroTableBuilder('test', testTable, {
+          id: true,
+          name: true,
+        }),
+      ).toThrowErrorMatchingInlineSnapshot(
+        `[Error: drizzle-zero: Unsupported table type: test. Only Postgres tables are supported.]`,
+      );
+    });
+  });
+}
