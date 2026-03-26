@@ -183,17 +183,30 @@ type DrizzleToZeroSchema<
 };
 
 // ---------------------------------------------------------------------------
-// Version detection — checked once at module load time
+// Version detection — per-schema, based on the shape of the entries
 // ---------------------------------------------------------------------------
 
-import * as drizzleOrm from 'drizzle-orm';
-
 /**
- * `defineRelations` exists only in drizzle-orm >= 1.0.
- * `Relations` exists only in drizzle-orm < 1.0.
+ * Detects whether a schema contains Drizzle 1.0 `defineRelations()` entries.
+ * These have the shape `{ table: Table, name: string, relations: {...} }`.
+ * If none are found, falls back to V1 (which handles `Relations` class instances).
  */
-const isDrizzle1 = typeof (drizzleOrm as any).defineRelations === 'function';
-const extractor: RelationExtractor = isDrizzle1 ? v2Extractor : v1Extractor;
+function pickExtractor(schema: Record<string, unknown>): RelationExtractor {
+  for (const value of Object.values(schema)) {
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'table' in value &&
+      'name' in value &&
+      'relations' in value &&
+      typeof (value as any).name === 'string' &&
+      typeof (value as any).relations === 'object'
+    ) {
+      return v2Extractor;
+    }
+  }
+  return v1Extractor;
+}
 
 // ---------------------------------------------------------------------------
 // drizzleZeroConfig
@@ -293,7 +306,9 @@ const drizzleZeroConfig = <
 
   // ---- Extract relationships ----
   const schemaRecord = schema as Record<string, unknown>;
-  const relationships: ExtractedRelationships = extractor.extract({
+  const relationships: ExtractedRelationships = pickExtractor(
+    schemaRecord,
+  ).extract({
     schema: schemaRecord,
     debug: config?.debug,
     includedTables: config?.tables as Record<string, unknown> | undefined,

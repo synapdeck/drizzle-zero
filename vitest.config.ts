@@ -1,5 +1,6 @@
 import tsconfigPaths from 'vite-tsconfig-paths';
 import {defineConfig} from 'vitest/config';
+import {drizzleTestAlias} from './tests/drizzle-test-alias';
 
 export default defineConfig({
   test: {
@@ -17,5 +18,5 @@ export default defineConfig({
     },
     fileParallelism: true,
   },
-  plugins: [tsconfigPaths()],
+  plugins: [drizzleTestAlias() as any, tsconfigPaths()],
 });
