@@ -11,7 +11,7 @@ import {
   table as zeroTable,
 } from '@rocicorp/zero';
 import type {Table} from 'drizzle-orm';
-import {getTableColumns, getTableName} from 'drizzle-orm';
+import {getTableName} from 'drizzle-orm';
 import {toCamelCase, toSnakeCase} from 'drizzle-orm/casing';
 import {getTableConfigForDatabase} from './db';
 import {
@@ -30,7 +30,7 @@ import type {
   FindPrimaryKeyFromTable,
   Flatten,
 } from './types';
-import type {AnyTable} from './relations/compat';
+import {type AnyTable, getTableColumns} from './relations/compat';
 import {debugLog, typedEntries} from './util';
 
 const warnedServerDefaults = new Set<string>();
@@ -395,7 +395,7 @@ const createZeroTableBuilder = <
 
       const schemaValue =
         column.enumValues && !isArrayColumn
-          ? zeroEnumeration<typeof column.enumValues>()
+          ? zeroEnumeration<(typeof column.enumValues)[number]>()
           : type === 'string'
             ? zeroString()
             : type === 'number'
@@ -458,7 +458,7 @@ const getDrizzleColumnKeyFromColumnName = ({
   columnName: string;
   table: AnyTable;
 }) => {
-  const tableColumns = getTableColumns(table as Table);
+  const tableColumns = getTableColumns(table);
 
   return typedEntries(tableColumns).find(
     ([_name, column]) => column.name === columnName,

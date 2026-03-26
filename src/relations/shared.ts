@@ -1,6 +1,6 @@
-import {getTableName, getTableUniqueName, is, Table} from 'drizzle-orm';
+import {is, Table} from 'drizzle-orm';
 import {getDrizzleColumnKeyFromColumnName} from '../tables';
-import type {AnyTable} from './compat';
+import {type AnyTable, getTableName, getTableUniqueName} from './compat';
 import {typedEntries} from '../util';
 
 /**
@@ -69,22 +69,19 @@ export const getDrizzleKeyFromTableFn: GetDrizzleKeyFromTable = ({
   table,
   fallbackTableName,
 }) => {
-  // Cast to the 1.0 Table type for getTableUniqueName/getTableName calls.
-  // At runtime both 0.x and 1.0 Table instances are duck-type compatible.
-  const t = table as Table | undefined;
-
-  if (t) {
+  if (table) {
     const directMatch = typedEntries(schema).find(
-      ([_name, v]) => is(v, Table) && v === t,
+      ([_name, v]) => is(v, Table) && v === table,
     )?.[0];
 
     if (directMatch) {
       return directMatch;
     }
 
-    const uniqueName = getTableUniqueName(t);
+    const uniqueName = getTableUniqueName(table);
     const uniqueMatch = typedEntries(schema).find(
-      ([_name, v]) => is(v, Table) && getTableUniqueName(v) === uniqueName,
+      ([_name, v]) =>
+        is(v, Table) && getTableUniqueName(v as AnyTable) === uniqueName,
     )?.[0];
 
     if (uniqueMatch) {
@@ -94,7 +91,8 @@ export const getDrizzleKeyFromTableFn: GetDrizzleKeyFromTable = ({
 
   if (fallbackTableName) {
     const fallbackMatch = typedEntries(schema).find(
-      ([_name, v]) => is(v, Table) && getTableName(v) === fallbackTableName,
+      ([_name, v]) =>
+        is(v, Table) && getTableName(v as AnyTable) === fallbackTableName,
     )?.[0];
 
     if (fallbackMatch) {
@@ -103,7 +101,7 @@ export const getDrizzleKeyFromTableFn: GetDrizzleKeyFromTable = ({
   }
 
   throw new Error(
-    `drizzle-zero: Unable to resolve table key for ${t ? getTableUniqueName(t) : fallbackTableName}`,
+    `drizzle-zero: Unable to resolve table key for ${table ? getTableUniqueName(table) : fallbackTableName}`,
   );
 };
 
