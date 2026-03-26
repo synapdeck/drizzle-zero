@@ -85,11 +85,18 @@ type CustomType<
                 : CD extends {$type: infer TType}
                   ? TType
                   : // Drizzle 1.0: no columnType in _.
-                    // Use _.data directly — it reflects $type<T>(),
-                    // enum literal unions, and default column types.
-                    CD extends {data: infer TData}
+                    // Check enumValues first (enum columns).
+                    CD extends {
+                        enumValues: readonly [string, ...string[]];
+                        data: infer TData;
+                      }
                     ? TData
-                    : DefaultColumnType<CD>
+                    : // Use _.data if it's not unknown (i.e. $type was used).
+                      CD extends {data: infer TData}
+                      ? unknown extends TData
+                        ? DefaultColumnType<CD>
+                        : TData
+                      : DefaultColumnType<CD>
         : unknown
       : unknown
     : unknown
