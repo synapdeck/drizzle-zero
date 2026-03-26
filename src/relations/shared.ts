@@ -58,11 +58,11 @@ export type GetDrizzleKeyFromTable = (args: {
 
 export interface ExtractionContext {
   schema: Record<string, unknown>;
-  debug?: boolean;
+  debug?: boolean | undefined;
   /** Which tables are included in the config (for skipping). undefined = all. */
-  includedTables?: Record<string, unknown>;
+  includedTables?: Record<string, unknown> | undefined;
   /** manyToMany config keyed by source table name → relation name → entry. */
-  manyToMany?: Record<string, Record<string, ManyToManyEntry>>;
+  manyToMany?: Record<string, Record<string, ManyToManyEntry>> | undefined;
   getDrizzleKeyFromTable: GetDrizzleKeyFromTable;
 }
 
