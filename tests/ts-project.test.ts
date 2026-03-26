@@ -11,7 +11,7 @@ describe('ensureSourceFileInProject', () => {
 
   beforeEach(() => {
     tsProject = new Project({
-      tsConfigFilePath: path.resolve(__dirname, '../tsconfig.json'),
+      tsConfigFilePath: path.resolve(__dirname, 'tsconfig.test.json'),
       skipAddingFilesFromTsConfig: true,
     });
   });
@@ -37,7 +37,7 @@ describe('ensureSourceFileInProject', () => {
   });
 
   it('should add source file if it exists but not in project', () => {
-    const filePath = path.resolve(__dirname, '../src/relations.ts');
+    const filePath = path.resolve(__dirname, '../src/relations/index.ts');
 
     const result = ensureSourceFileInProject({
       tsProject,

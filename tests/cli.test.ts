@@ -17,7 +17,7 @@ describe('getGeneratedSchema', () => {
 
   beforeEach(() => {
     tsProject = new Project({
-      tsConfigFilePath: path.resolve(__dirname, '../tsconfig.json'),
+      tsConfigFilePath: path.resolve(__dirname, 'tsconfig.test.json'),
       skipAddingFilesFromTsConfig: true,
     });
 
@@ -1483,7 +1483,7 @@ describe('drizzle-kit functions', () => {
 
   beforeEach(() => {
     tsProject = new Project({
-      tsConfigFilePath: path.resolve(__dirname, '../tsconfig.json'),
+      tsConfigFilePath: path.resolve(__dirname, 'tsconfig.test.json'),
     });
   });
 
@@ -1678,7 +1678,7 @@ describe('getConfigFromFile', () => {
 
   beforeEach(() => {
     tsProject = new Project({
-      tsConfigFilePath: path.resolve(__dirname, '../tsconfig.json'),
+      tsConfigFilePath: path.resolve(__dirname, 'tsconfig.test.json'),
     });
   });
 
@@ -1716,7 +1716,7 @@ describe('signature integration', () => {
 
   beforeEach(() => {
     tsProject = new Project({
-      tsConfigFilePath: path.resolve(__dirname, '../tsconfig.json'),
+      tsConfigFilePath: path.resolve(__dirname, 'tsconfig.test.json'),
       skipAddingFilesFromTsConfig: true,
     });
     tsProject.addSourceFileAtPath(schemaPath);
