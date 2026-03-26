@@ -183,25 +183,88 @@ type DrizzleToZeroSchema<
 };
 
 // ---------------------------------------------------------------------------
-// Version detection — per-schema, based on the shape of the entries
+// Schema normalization & version detection
 // ---------------------------------------------------------------------------
 
 /**
- * Detects whether a schema contains Drizzle 1.0 `defineRelations()` entries.
- * These have the shape `{ table: Table, name: string, relations: {...} }`.
- * If none are found, falls back to V1 (which handles `Relations` class instances).
+ * Returns true if value looks like a Drizzle 1.0 V2 relations entry
+ * (output of `defineRelations()`), i.e. `{ table: Table, name: string, relations: {...} }`.
+ */
+function isV2Entry(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'table' in value &&
+    'name' in value &&
+    'relations' in value &&
+    typeof (value as any).name === 'string' &&
+    typeof (value as any).relations === 'object'
+  );
+}
+
+/**
+ * Returns true if value is a `defineRelations()` wrapper — a plain object
+ * whose values are all V2 relation entries.
+ */
+function isV2RelationsWrapper(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const entries = Object.values(value);
+  return entries.length > 0 && entries.every(isV2Entry);
+}
+
+/**
+ * Normalizes a schema by spreading `defineRelations()` wrapper objects
+ * into top-level entries.
+ *
+ * Users pass `{users, posts, relations}` where `relations` is the result
+ * of `defineRelations({users, posts}, ...)`. This function flattens the
+ * wrapper so each V2 entry (users, posts) appears as a top-level value.
+ */
+function normalizeSchema(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  let needsNormalization = false;
+  for (const value of Object.values(schema)) {
+    if (isV2RelationsWrapper(value)) {
+      needsNormalization = true;
+      break;
+    }
+  }
+  if (!needsNormalization) return schema;
+
+  // First pass: copy all non-wrapper entries
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (!isV2RelationsWrapper(value)) {
+      normalized[key] = value;
+    }
+  }
+  // Second pass: spread V2 entries without overwriting existing keys
+  // (raw Table instances from the user's schema take precedence)
+  for (const value of Object.values(schema)) {
+    if (isV2RelationsWrapper(value)) {
+      for (const [innerKey, innerValue] of Object.entries(
+        value as Record<string, unknown>,
+      )) {
+        if (!(innerKey in normalized)) {
+          normalized[innerKey] = innerValue;
+        } else {
+          // Key already exists (as a raw Table). Add the V2 entry under
+          // a synthetic key so the extractor can still find it.
+          normalized[`__v2_rel_${innerKey}`] = innerValue;
+        }
+      }
+    }
+  }
+  return normalized;
+}
+
+/**
+ * Picks the relation extractor based on schema contents.
  */
 function pickExtractor(schema: Record<string, unknown>): RelationExtractor {
   for (const value of Object.values(schema)) {
-    if (
-      typeof value === 'object' &&
-      value !== null &&
-      'table' in value &&
-      'name' in value &&
-      'relations' in value &&
-      typeof (value as any).name === 'string' &&
-      typeof (value as any).relations === 'object'
-    ) {
+    if (isV2Entry(value)) {
       return v2Extractor;
     }
   }
@@ -233,11 +296,16 @@ const drizzleZeroConfig = <
     readonly suppressDefaultsWarning?: boolean;
   },
 ): Flatten<DrizzleToZeroSchema<TDrizzleSchema, TColumnConfig>> => {
+  // Normalize: spread defineRelations() wrapper objects into top-level entries
+  const normalizedSchema = normalizeSchema(
+    schema as Record<string, unknown>,
+  ) as TDrizzleSchema;
+
   const tables: any[] = [];
   const tableColumnNamesForSourceTable = new Map<string, Set<string>>();
 
   // ---- Build tables ----
-  for (const [tableName, tableOrRelations] of typedEntries(schema)) {
+  for (const [tableName, tableOrRelations] of typedEntries(normalizedSchema)) {
     if (!tableOrRelations) {
       throw new Error(
         `drizzle-zero: table or relation with key ${String(tableName)} is not defined`,
@@ -305,7 +373,7 @@ const drizzleZeroConfig = <
   }
 
   // ---- Extract relationships ----
-  const schemaRecord = schema as Record<string, unknown>;
+  const schemaRecord = normalizedSchema as Record<string, unknown>;
   const relationships: ExtractedRelationships = pickExtractor(
     schemaRecord,
   ).extract({
