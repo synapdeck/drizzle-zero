@@ -78,44 +78,49 @@ type TimestampConstraints = 'date' | 'timestamp' | 'timestamptz';
 /** Constraints that indicate a numeric string type (maps to number in Zero). */
 type NumericStringConstraints = 'numeric' | 'time';
 
-/**
- * Detects whether a Drizzle 1.0 compound dataType represents a timestamp.
- * These are mapped to 'number' in Zero (epoch millis).
- */
-export type IsTimestampDataType<T extends string> =
-  ExtractConstraint<T> extends TimestampConstraints ? true : false;
+/** All known-safe constraints that Zero supports. */
+type KnownConstraints =
+  | TimestampConstraints
+  | NumericStringConstraints
+  | 'uuid'
+  | 'int16'
+  | 'int32'
+  | 'int64'
+  | 'float'
+  | 'double'
+  | 'json';
 
 /**
- * Detects whether a Drizzle 1.0 compound dataType represents a bigint.
+ * Returns true if the constraint is known/safe, or if there is no constraint.
  */
-export type IsBigIntDataType<T extends string> =
-  ExtractBaseType<T> extends 'bigint' ? true : false;
-
-/**
- * Detects whether a Drizzle 1.0 compound dataType represents a string numeric.
- */
-export type IsStringNumericDataType<T extends string> =
-  ExtractBaseType<T> extends 'string'
-    ? ExtractConstraint<T> extends NumericStringConstraints
+type IsKnownConstraint<T extends string> =
+  ExtractConstraint<T> extends never
+    ? true // no constraint (single-word dataType)
+    : ExtractConstraint<T> extends KnownConstraints
       ? true
-      : false
-    : false;
+      : false;
 
 /**
  * Maps a Drizzle 1.0 compound dataType to its Zero type.
- * Special-cases timestamps (object date, string timestamp) → number,
- * bigint → number, string numeric → number.
+ * Returns never for unknown constraints (unsupported types like
+ * interval, cidr, macaddr, inet, point, line, geometry).
  */
 export type MapDrizzle1DataTypeToZero<T extends string> =
-  IsTimestampDataType<T> extends true
-    ? 'number'
-    : IsBigIntDataType<T> extends true
+  IsKnownConstraint<T> extends false
+    ? never
+    : ExtractConstraint<T> extends TimestampConstraints
       ? 'number'
-      : IsStringNumericDataType<T> extends true
+      : ExtractBaseType<T> extends 'bigint'
         ? 'number'
-        : ExtractBaseType<T> extends keyof Drizzle1BaseTypeToZeroType
-          ? Drizzle1BaseTypeToZeroType[ExtractBaseType<T>]
-          : never;
+        : ExtractBaseType<T> extends 'string'
+          ? ExtractConstraint<T> extends NumericStringConstraints
+            ? 'number'
+            : ExtractBaseType<T> extends keyof Drizzle1BaseTypeToZeroType
+              ? Drizzle1BaseTypeToZeroType[ExtractBaseType<T>]
+              : never
+          : ExtractBaseType<T> extends keyof Drizzle1BaseTypeToZeroType
+            ? Drizzle1BaseTypeToZeroType[ExtractBaseType<T>]
+            : never;
 
 /**
  * Runtime: extracts the base type from a compound dataType string.
@@ -142,12 +147,43 @@ const timestampConstraints = new Set<string>([
 const numericStringConstraints = new Set<string>(['numeric', 'time']);
 
 /**
+ * All known-safe constraints that map to a Zero type.
+ * Constraints NOT in this set are unsupported (interval, cidr, macaddr,
+ * inet, point, line, geometry, etc.) and should fall through to null.
+ */
+const knownConstraints = new Set<string>([
+  // Timestamps / dates → number
+  'date',
+  'timestamp',
+  'timestamptz',
+  // Numeric strings → number
+  'numeric',
+  'time',
+  // String types → string
+  'uuid',
+  // Number types → number
+  'int16',
+  'int32',
+  'int64',
+  'float',
+  'double',
+  // JSON types → json
+  'json',
+]);
+
+/**
  * Runtime: maps a Drizzle 1.0 compound dataType to its Zero type.
- * Returns null if the type is 'custom' or unknown (fallback to getSQLType).
+ * Returns null if the type is 'custom' or has an unknown constraint
+ * (fallback to getSQLType).
  */
 export function mapDrizzle1DataTypeToZero(dataType: string): string | null {
   const base = extractBaseType(dataType);
   const constraint = extractConstraint(dataType);
+
+  // If there's a constraint we don't recognize, it's unsupported
+  if (constraint && !knownConstraints.has(constraint)) {
+    return null;
+  }
 
   // Special cases: timestamps/dates always map to number
   if (constraint && timestampConstraints.has(constraint)) {
