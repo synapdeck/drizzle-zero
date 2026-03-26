@@ -85,21 +85,20 @@ type CustomType<
                 : CD extends {$type: infer TType}
                   ? TType
                   : // Drizzle 1.0: no columnType in _.
-                    // Check enumValues first (enum columns).
+                    // Check enumValues first (enum columns have literal unions in data).
                     CD extends {
                         enumValues: readonly [string, ...string[]];
                         data: infer TData;
                       }
                     ? TData
-                    : // Use _.data if it's a concrete type (i.e. $type was used
-                      // and resolved successfully). If data is `unknown` (no
-                      // $type) or `any` (unresolvable $type), fall back.
+                    : // If data is `any` (from an unresolvable $type<T>() import),
+                      // preserve it so isSafeResolvedType filters it out — matching
+                      // v0 behavior where $type was detected and the unresolvable
+                      // type was surfaced.
                       CD extends {data: infer TData}
                       ? IsAny<TData> extends true
-                        ? TData // preserve `any` so isSafeResolvedType filters it
-                        : unknown extends TData
-                          ? DefaultColumnType<CD>
-                          : TData
+                        ? TData
+                        : DefaultColumnType<CD>
                       : DefaultColumnType<CD>
         : unknown
       : unknown
