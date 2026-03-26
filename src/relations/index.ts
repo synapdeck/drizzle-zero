@@ -91,11 +91,15 @@ type CustomType<
                         data: infer TData;
                       }
                     ? TData
-                    : // Use _.data if it's not unknown (i.e. $type was used).
+                    : // Use _.data if it's a concrete type (i.e. $type was used
+                      // and resolved successfully). If data is `unknown` (no
+                      // $type) or `any` (unresolvable $type), fall back.
                       CD extends {data: infer TData}
-                      ? unknown extends TData
-                        ? DefaultColumnType<CD>
-                        : TData
+                      ? IsAny<TData> extends true
+                        ? TData // preserve `any` so isSafeResolvedType filters it
+                        : unknown extends TData
+                          ? DefaultColumnType<CD>
+                          : TData
                       : DefaultColumnType<CD>
         : unknown
       : unknown
