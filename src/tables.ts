@@ -30,6 +30,7 @@ import type {
   FindPrimaryKeyFromTable,
   Flatten,
 } from './types';
+import type {AnyTable} from './relations/compat';
 import {debugLog, typedEntries} from './util';
 
 const warnedServerDefaults = new Set<string>();
@@ -452,9 +453,9 @@ const getDrizzleColumnKeyFromColumnName = ({
   table,
 }: {
   columnName: string;
-  table: Table;
+  table: AnyTable;
 }) => {
-  const tableColumns = getTableColumns(table);
+  const tableColumns = getTableColumns(table as Table);
 
   return typedEntries(tableColumns).find(
     ([_name, column]) => column.name === columnName,
