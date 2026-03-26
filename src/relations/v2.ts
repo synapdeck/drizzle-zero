@@ -8,6 +8,7 @@
 import {is, One, Table} from 'drizzle-orm';
 import {One as OneV2} from 'drizzle-orm/relations';
 import {getDrizzleColumnKeyFromColumnName} from '../tables';
+import {debugLog} from '../util';
 import type {
   ExtractionContext,
   ExtractedRelationships,
@@ -47,19 +48,158 @@ export const v2Extractor: RelationExtractor = {
   },
 
   extract(ctx) {
-    return extractV2Relations(ctx);
+    const relationships: ExtractedRelationships = {};
+    extractManyToMany(ctx, relationships);
+    extractDirectRelations(ctx, relationships);
+    return relationships;
   },
 };
 
-// ---- implementation ----
+// ---- manyToMany ----
 
-function extractV2Relations({
-  schema,
-  includedTables,
-  getDrizzleKeyFromTable,
-}: ExtractionContext): ExtractedRelationships {
-  const relationships: ExtractedRelationships = {};
+function extractManyToMany(
+  {schema, debug, includedTables, manyToMany}: ExtractionContext,
+  relationships: ExtractedRelationships,
+) {
+  if (!manyToMany) return;
 
+  // Collect V2 entries for junction field resolution
+  const v2Entries = new Map<string, V2RelationsEntry>();
+  for (const value of Object.values(schema)) {
+    if (isV2Entry(value)) {
+      v2Entries.set(value.name, value);
+    }
+  }
+
+  for (const [sourceTableName, relEntries] of Object.entries(manyToMany)) {
+    for (const [relationName, entry] of Object.entries(relEntries)) {
+      if (typeof entry[0] === 'string' && typeof entry[1] === 'string') {
+        // Simple string tuple form — auto-detect junction fields from V2 relations
+        const junctionTableName = entry[0];
+        const destTableName = entry[1];
+
+        const sourceJunction = findV2FieldsBetween(
+          v2Entries,
+          sourceTableName,
+          junctionTableName,
+        );
+        const junctionDest = findV2FieldsBetween(
+          v2Entries,
+          destTableName,
+          junctionTableName,
+        );
+
+        if (
+          !sourceJunction.sourceFieldNames.length ||
+          !sourceJunction.destFieldNames.length ||
+          !junctionDest.sourceFieldNames.length ||
+          !junctionDest.destFieldNames.length
+        ) {
+          throw new Error(
+            `drizzle-zero: Invalid many-to-many configuration for ${sourceTableName}.${relationName}: Could not find relationships in junction table ${junctionTableName}`,
+          );
+        }
+
+        if (
+          includedTables &&
+          (!includedTables[junctionTableName] ||
+            !includedTables[sourceTableName] ||
+            !includedTables[destTableName])
+        ) {
+          debugLog(
+            debug,
+            `Skipping many-to-many relationship - tables not in schema config:`,
+            {junctionTableName, sourceTableName, destTableName},
+          );
+          continue;
+        }
+
+        relationships[sourceTableName] = {
+          ...relationships[sourceTableName],
+          [relationName]: [
+            {
+              sourceField: sourceJunction.sourceFieldNames,
+              destField: sourceJunction.destFieldNames,
+              destSchema: junctionTableName,
+              cardinality: 'many',
+            },
+            {
+              sourceField: junctionDest.destFieldNames,
+              destField: junctionDest.sourceFieldNames,
+              destSchema: destTableName,
+              cardinality: 'many',
+            },
+          ],
+        };
+
+        debugLog(debug, `Added many-to-many relationship:`, {
+          sourceTable: sourceTableName,
+          relationName,
+          relationship: relationships[sourceTableName]?.[relationName],
+        });
+      } else {
+        // Explicit object form — same as V1
+        const junction = entry[0] as {
+          destTable: string;
+          sourceField: string[];
+          destField: string[];
+        };
+        const dest = entry[1] as {
+          destTable: string;
+          sourceField: string[];
+          destField: string[];
+        };
+
+        if (
+          !junction.sourceField ||
+          !junction.destField ||
+          !dest.sourceField ||
+          !dest.destField ||
+          !junction.destTable ||
+          !dest.destTable
+        ) {
+          throw new Error(
+            `drizzle-zero: Invalid many-to-many configuration for ${sourceTableName}.${relationName}: Not all required fields were provided.`,
+          );
+        }
+
+        if (
+          includedTables &&
+          (!includedTables[junction.destTable] ||
+            !includedTables[sourceTableName] ||
+            !includedTables[dest.destTable])
+        ) {
+          continue;
+        }
+
+        relationships[sourceTableName] = {
+          ...relationships[sourceTableName],
+          [relationName]: [
+            {
+              sourceField: junction.sourceField,
+              destField: junction.destField,
+              destSchema: junction.destTable,
+              cardinality: 'many',
+            },
+            {
+              sourceField: dest.sourceField,
+              destField: dest.destField,
+              destSchema: dest.destTable,
+              cardinality: 'many',
+            },
+          ],
+        };
+      }
+    }
+  }
+}
+
+// ---- direct relations ----
+
+function extractDirectRelations(
+  {schema, debug, includedTables, getDrizzleKeyFromTable}: ExtractionContext,
+  relationships: ExtractedRelationships,
+) {
   // Collect all V2 entries for cross-referencing reversed Many relations
   const v2Entries = new Map<string, V2RelationsEntry>();
   for (const value of Object.values(schema)) {
@@ -132,6 +272,10 @@ function extractV2Relations({
         includedTables !== undefined &&
         (!includedTables[tableName] || !includedTables[referencedTableKey])
       ) {
+        debugLog(debug, `Skipping relation - tables not in schema config:`, {
+          sourceTable: tableName,
+          referencedTable: referencedTableKey,
+        });
         continue;
       }
 
@@ -154,8 +298,6 @@ function extractV2Relations({
       };
     }
   }
-
-  return relationships;
 }
 
 // ---- helpers ----
@@ -167,4 +309,54 @@ function columnsToKeys(columns: any[]): string[] {
       table: c.table,
     }),
   );
+}
+
+/**
+ * Find the source/dest field names between two tables using V2 relation
+ * entries. Looks for a One relation from `sourceTableName` to
+ * `referencedTableName`, or the inverse.
+ */
+function findV2FieldsBetween(
+  v2Entries: Map<string, V2RelationsEntry>,
+  sourceTableName: string,
+  referencedTableName: string,
+): {sourceFieldNames: string[]; destFieldNames: string[]} {
+  // Check if the source table has a One pointing at the referenced table
+  const sourceEntry = v2Entries.get(sourceTableName);
+  if (sourceEntry) {
+    for (const rel of Object.values(sourceEntry.relations)) {
+      const isOne =
+        (rel as any).relationType === 'one' || is(rel, One) || is(rel, OneV2);
+      if (!isOne) continue;
+
+      if ((rel as any).targetTableName === referencedTableName) {
+        const src = columnsToKeys((rel as any).sourceColumns ?? []);
+        const dst = columnsToKeys((rel as any).targetColumns ?? []);
+        if (src.length && dst.length) {
+          return {sourceFieldNames: src, destFieldNames: dst};
+        }
+      }
+    }
+  }
+
+  // Check the inverse: referenced table has a One pointing at source
+  const refEntry = v2Entries.get(referencedTableName);
+  if (refEntry) {
+    for (const rel of Object.values(refEntry.relations)) {
+      const isOne =
+        (rel as any).relationType === 'one' || is(rel, One) || is(rel, OneV2);
+      if (!isOne) continue;
+
+      if ((rel as any).targetTableName === sourceTableName) {
+        // Reversed: their source→target becomes our target→source
+        const src = columnsToKeys((rel as any).targetColumns ?? []);
+        const dst = columnsToKeys((rel as any).sourceColumns ?? []);
+        if (src.length && dst.length) {
+          return {sourceFieldNames: src, destFieldNames: dst};
+        }
+      }
+    }
+  }
+
+  return {sourceFieldNames: [], destFieldNames: []};
 }

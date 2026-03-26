@@ -23,23 +23,29 @@ export type ExtractedRelationships = Record<
 >;
 
 /**
+ * Parsed manyToMany entry — either a simple string tuple or explicit field objects.
+ */
+export type ManyToManyEntry =
+  | readonly [string, string]
+  | readonly [
+      {destTable: string; sourceField: string[]; destField: string[]},
+      {destTable: string; sourceField: string[]; destField: string[]},
+    ];
+
+/**
  * The contract that V1 and V2 relation extractors implement.
  *
- * Given the full Drizzle schema object and debug flag, scan for relation
- * definitions and return the resolved relationship map.
- *
- * `getDrizzleKeyFromTable` is provided so extractors can resolve table
- * instances back to their schema key names.
+ * Given the full Drizzle schema and config context, scan for relation
+ * definitions (including manyToMany) and return the resolved relationship map.
  */
 export interface RelationExtractor {
   /**
    * Returns true if this extractor can handle the given schema.
-   * Checked entry-by-entry: at least one entry must match.
    */
   detect(schema: Record<string, unknown>): boolean;
 
   /**
-   * Extract relationships from the schema.
+   * Extract all relationships from the schema, including manyToMany.
    */
   extract(ctx: ExtractionContext): ExtractedRelationships;
 }
@@ -55,6 +61,8 @@ export interface ExtractionContext {
   debug?: boolean;
   /** Which tables are included in the config (for skipping). undefined = all. */
   includedTables?: Record<string, unknown>;
+  /** manyToMany config keyed by source table name → relation name → entry. */
+  manyToMany?: Record<string, Record<string, ManyToManyEntry>>;
   getDrizzleKeyFromTable: GetDrizzleKeyFromTable;
 }
 

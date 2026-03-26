@@ -5,9 +5,7 @@
  * legacy `Relations` class (drizzle-orm < 1.0).
  *
  * We import from `drizzle-orm-v0` (a pnpm alias for drizzle-orm@0.45)
- * so this file gets real 0.x types at compile time.  At runtime, the
- * bundled JS just does `require("drizzle-orm")` — the alias only
- * exists in the dev workspace.
+ * so this file gets real 0.x types at compile time.
  */
 import type {Many, One} from 'drizzle-orm-v0';
 import {
@@ -20,7 +18,7 @@ import {
   Table,
 } from 'drizzle-orm-v0';
 import {getDrizzleColumnKeyFromColumnName} from '../tables';
-import {typedEntries} from '../util';
+import {debugLog, typedEntries} from '../util';
 import type {
   ExtractionContext,
   ExtractedRelationships,
@@ -38,19 +36,161 @@ export const v1Extractor: RelationExtractor = {
   },
 
   extract(ctx) {
-    return extractV1Relations(ctx);
+    const relationships: ExtractedRelationships = {};
+    extractManyToMany(ctx, relationships);
+    extractDirectRelations(ctx, relationships);
+    return relationships;
   },
 };
 
-// ---- implementation ----
+// ---- manyToMany ----
 
-function extractV1Relations({
-  schema,
-  includedTables,
-  getDrizzleKeyFromTable,
-}: ExtractionContext): ExtractedRelationships {
-  const relationships: ExtractedRelationships = {};
+function extractManyToMany(
+  {schema, debug, includedTables, manyToMany}: ExtractionContext,
+  relationships: ExtractedRelationships,
+) {
+  if (!manyToMany) return;
 
+  for (const [sourceTableName, relEntries] of Object.entries(manyToMany)) {
+    for (const [relationName, entry] of Object.entries(relEntries)) {
+      if (typeof entry[0] === 'string' && typeof entry[1] === 'string') {
+        // Simple string tuple form — auto-detect junction fields from relations
+        const junctionTableName = entry[0];
+        const destTableName = entry[1];
+
+        const sourceTable = findTable(schema, sourceTableName);
+        const destTable = findTable(schema, destTableName);
+        const junctionTable = findTable(schema, junctionTableName);
+
+        if (!sourceTable || !destTable || !junctionTable) {
+          throw new Error(
+            `drizzle-zero: Invalid many-to-many configuration for ${sourceTableName}.${relationName}: Could not find ${!sourceTable ? 'source' : !destTable ? 'destination' : 'junction'} table`,
+          );
+        }
+
+        const sourceJunctionFields = findRelationSourceAndDestFields(schema, {
+          sourceTable,
+          referencedTableName: getTableName(junctionTable),
+          referencedTable: junctionTable,
+        });
+
+        const junctionDestFields = findRelationSourceAndDestFields(schema, {
+          sourceTable: destTable,
+          referencedTableName: getTableName(junctionTable),
+          referencedTable: junctionTable,
+        });
+
+        if (
+          !sourceJunctionFields.sourceFieldNames.length ||
+          !sourceJunctionFields.destFieldNames.length ||
+          !junctionDestFields.sourceFieldNames.length ||
+          !junctionDestFields.destFieldNames.length
+        ) {
+          throw new Error(
+            `drizzle-zero: Invalid many-to-many configuration for ${sourceTableName}.${relationName}: Could not find relationships in junction table ${junctionTableName}`,
+          );
+        }
+
+        if (
+          includedTables &&
+          (!includedTables[junctionTableName] ||
+            !includedTables[sourceTableName] ||
+            !includedTables[destTableName])
+        ) {
+          debugLog(
+            debug,
+            `Skipping many-to-many relationship - tables not in schema config:`,
+            {junctionTableName, sourceTableName, destTableName},
+          );
+          continue;
+        }
+
+        relationships[sourceTableName] = {
+          ...relationships[sourceTableName],
+          [relationName]: [
+            {
+              sourceField: sourceJunctionFields.sourceFieldNames,
+              destField: sourceJunctionFields.destFieldNames,
+              destSchema: junctionTableName,
+              cardinality: 'many',
+            },
+            {
+              sourceField: junctionDestFields.destFieldNames,
+              destField: junctionDestFields.sourceFieldNames,
+              destSchema: destTableName,
+              cardinality: 'many',
+            },
+          ],
+        };
+
+        debugLog(debug, `Added many-to-many relationship:`, {
+          sourceTable: sourceTableName,
+          relationName,
+          relationship: relationships[sourceTableName]?.[relationName],
+        });
+      } else {
+        // Explicit object form
+        const junction = entry[0] as {
+          destTable: string;
+          sourceField: string[];
+          destField: string[];
+        };
+        const dest = entry[1] as {
+          destTable: string;
+          sourceField: string[];
+          destField: string[];
+        };
+
+        if (
+          !junction.sourceField ||
+          !junction.destField ||
+          !dest.sourceField ||
+          !dest.destField ||
+          !junction.destTable ||
+          !dest.destTable
+        ) {
+          throw new Error(
+            `drizzle-zero: Invalid many-to-many configuration for ${sourceTableName}.${relationName}: Not all required fields were provided.`,
+          );
+        }
+
+        if (
+          includedTables &&
+          (!includedTables[junction.destTable] ||
+            !includedTables[sourceTableName] ||
+            !includedTables[dest.destTable])
+        ) {
+          continue;
+        }
+
+        relationships[sourceTableName] = {
+          ...relationships[sourceTableName],
+          [relationName]: [
+            {
+              sourceField: junction.sourceField,
+              destField: junction.destField,
+              destSchema: junction.destTable,
+              cardinality: 'many',
+            },
+            {
+              sourceField: dest.sourceField,
+              destField: dest.destField,
+              destSchema: dest.destTable,
+              cardinality: 'many',
+            },
+          ],
+        };
+      }
+    }
+  }
+}
+
+// ---- direct relations ----
+
+function extractDirectRelations(
+  {schema, includedTables, getDrizzleKeyFromTable, debug}: ExtractionContext,
+  relationships: ExtractedRelationships,
+) {
   for (const [_schemaKey, tableOrRelations] of typedEntries(schema)) {
     if (!is(tableOrRelations, Relations)) continue;
 
@@ -112,6 +252,10 @@ function extractV1Relations({
         includedTables !== undefined &&
         (!includedTables[tableName] || !includedTables[referencedTableKey])
       ) {
+        debugLog(debug, `Skipping relation - tables not in schema config:`, {
+          sourceTable: tableName,
+          referencedTable: referencedTableKey,
+        });
         continue;
       }
 
@@ -134,11 +278,19 @@ function extractV1Relations({
       };
     }
   }
-
-  return relationships;
 }
 
-// ---- V1 helpers (unchanged logic from the original relations.ts) ----
+// ---- helpers ----
+
+function findTable(
+  schema: Record<string, unknown>,
+  tableName: string,
+): Table | undefined {
+  const entry = typedEntries(schema).find(
+    ([key, value]) => is(value, Table) && key === tableName,
+  );
+  return entry ? (entry[1] as Table) : undefined;
+}
 
 const getReferencedTableName = (
   rel:
