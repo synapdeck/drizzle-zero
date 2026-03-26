@@ -83,6 +83,7 @@ type KnownConstraints =
   | TimestampConstraints
   | NumericStringConstraints
   | 'uuid'
+  | 'enum'
   | 'int16'
   | 'int32'
   | 'int64'
@@ -104,23 +105,33 @@ type IsKnownConstraint<T extends string> =
  * Maps a Drizzle 1.0 compound dataType to its Zero type.
  * Returns never for unknown constraints (unsupported types like
  * interval, cidr, macaddr, inet, point, line, geometry).
+ *
+ * Note: `never extends X` is always true in TypeScript, so we must
+ * use `[T] extends [never]` checks before conditional checks on
+ * `ExtractConstraint<T>`.
  */
 export type MapDrizzle1DataTypeToZero<T extends string> =
   IsKnownConstraint<T> extends false
     ? never
-    : ExtractConstraint<T> extends TimestampConstraints
-      ? 'number'
-      : ExtractBaseType<T> extends 'bigint'
+    : [ExtractConstraint<T>] extends [never]
+      ? // No constraint (single-word dataType like 'string', 'boolean', 'number')
+        ExtractBaseType<T> extends keyof Drizzle1BaseTypeToZeroType
+        ? Drizzle1BaseTypeToZeroType[ExtractBaseType<T>]
+        : never
+      : // Has a constraint — check specific mappings
+        ExtractConstraint<T> extends TimestampConstraints
         ? 'number'
-        : ExtractBaseType<T> extends 'string'
-          ? ExtractConstraint<T> extends NumericStringConstraints
-            ? 'number'
+        : ExtractBaseType<T> extends 'bigint'
+          ? 'number'
+          : ExtractBaseType<T> extends 'string'
+            ? ExtractConstraint<T> extends NumericStringConstraints
+              ? 'number'
+              : ExtractBaseType<T> extends keyof Drizzle1BaseTypeToZeroType
+                ? Drizzle1BaseTypeToZeroType[ExtractBaseType<T>]
+                : never
             : ExtractBaseType<T> extends keyof Drizzle1BaseTypeToZeroType
               ? Drizzle1BaseTypeToZeroType[ExtractBaseType<T>]
-              : never
-          : ExtractBaseType<T> extends keyof Drizzle1BaseTypeToZeroType
-            ? Drizzle1BaseTypeToZeroType[ExtractBaseType<T>]
-            : never;
+              : never;
 
 /**
  * Runtime: extracts the base type from a compound dataType string.
@@ -161,6 +172,7 @@ const knownConstraints = new Set<string>([
   'time',
   // String types → string
   'uuid',
+  'enum',
   // Number types → number
   'int16',
   'int32',

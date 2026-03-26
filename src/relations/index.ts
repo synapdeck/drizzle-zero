@@ -71,7 +71,8 @@ type CustomType<
   ? DrizzleSchema[TableKey] extends Table
     ? ColumnKey extends keyof DrizzleSchema[TableKey]
       ? DrizzleSchema[TableKey][ColumnKey] extends {_: infer CD}
-        ? CD extends {columnType: 'PgCustomColumn'; data: infer TData}
+        ? // Drizzle 0.x: columnType is a literal string in _
+          CD extends {columnType: 'PgCustomColumn'; data: infer TData}
           ? TData
           : CD extends {columnType: 'PgEnumColumn'; data: infer TData}
             ? TData
@@ -83,7 +84,12 @@ type CustomType<
                 ? TArrayData
                 : CD extends {$type: infer TType}
                   ? TType
-                  : DefaultColumnType<CD>
+                  : // Drizzle 1.0: no columnType in _.
+                    // Use _.data directly — it reflects $type<T>(),
+                    // enum literal unions, and default column types.
+                    CD extends {data: infer TData}
+                    ? TData
+                    : DefaultColumnType<CD>
         : unknown
       : unknown
     : unknown
