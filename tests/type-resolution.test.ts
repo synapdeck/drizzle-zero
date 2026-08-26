@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import {Project} from 'ts-morph';
 import {describe, expect, test} from 'vitest';
 import {
+  canonicalizeTypeText,
   isSafeResolvedType,
   resolveCustomTypes,
 } from '../src/cli/type-resolution';
@@ -598,5 +599,61 @@ describe('isSafeResolvedType', () => {
 
   test.each(unsafeTypes)('returns false for unsafe type %s', typeText => {
     expect(isSafeResolvedType(typeText)).toBe(false);
+  });
+});
+
+describe('canonicalizeTypeText', () => {
+  test('orders union members by their printed form', () => {
+    // TypeScript prints union members in whatever order the checker created
+    // them in, which reflects the whole program rather than the type.
+    expect(canonicalizeTypeText(`"WY" | "AL" | "AK"`)).toBe(
+      `"AK" | "AL" | "WY"`,
+    );
+  });
+
+  test('converges on the same text for the same set of members', () => {
+    expect(canonicalizeTypeText(`"AK" | "WY" | "AL"`)).toBe(
+      canonicalizeTypeText(`"WY" | "AL" | "AK"`),
+    );
+  });
+
+  test('orders nested unions, intersections and object members', () => {
+    expect(canonicalizeTypeText(`{ b: string; a: "z" | "y" } | null`)).toBe(
+      `null | {a: "y" | "z"; b: string}`,
+    );
+    expect(canonicalizeTypeText(`("b" | "a")[]`)).toBe(`("a" | "b")[]`);
+    expect(canonicalizeTypeText(`{ [k: string]: "b" | "a" }`)).toBe(
+      `{[k: string]: "a" | "b"}`,
+    );
+    expect(canonicalizeTypeText(`{ b: 1 } & { a: 2 }`)).toBe(`{a: 2} & {b: 1}`);
+  });
+
+  test('keeps tuple elements in place', () => {
+    expect(canonicalizeTypeText(`[string, number, "b" | "a"]`)).toBe(
+      `[string, number, "a" | "b"]`,
+    );
+  });
+
+  test('preserves optional and readonly members', () => {
+    expect(canonicalizeTypeText(`{ b?: string; a: number }`)).toBe(
+      `{a: number; b?: string}`,
+    );
+    expect(canonicalizeTypeText(`{ readonly b: string; a: number }`)).toBe(
+      `{a: number; readonly b: string}`,
+    );
+  });
+
+  test('is idempotent', () => {
+    const once = canonicalizeTypeText(`{ b: "2" | "1" } | "z" | "a"`);
+
+    expect(canonicalizeTypeText(once)).toBe(once);
+  });
+
+  test('leaves text it cannot parse alone', () => {
+    expect(canonicalizeTypeText('this is not a type <<<')).toBe(
+      'this is not a type <<<',
+    );
+    expect(canonicalizeTypeText('ReadonlyJSONValue')).toBe('ReadonlyJSONValue');
+    expect(canonicalizeTypeText('string')).toBe('string');
   });
 });
