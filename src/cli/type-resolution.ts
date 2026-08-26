@@ -89,7 +89,7 @@ export function resolveCustomTypes({
     const text = type.getText(alias, typeFormatFlags);
 
     if (isSafeResolvedType(text)) {
-      resolved.set(key, text);
+      resolved.set(key, canonicalizeTypeText(text));
     }
   }
 
@@ -189,4 +189,131 @@ export const isSafeResolvedType = (typeText: string | undefined): boolean => {
   }
 
   return true;
+};
+
+/**
+ * Reorders the parts of a printed type that TypeScript orders by internal
+ * type id.
+ *
+ * TypeScript interns literal types globally and keeps union and intersection
+ * members sorted by the id each type was assigned when the checker first
+ * created it. The printed order therefore encodes the order the whole program
+ * was checked in, not anything about the type: moving an entry in an
+ * unrelated lookup table shifts a member in every union that mentions it, and
+ * the ids differ between TypeScript versions.
+ *
+ * Sorting the members ourselves makes the printed form depend only on the set
+ * of members. Anything this does not recognise is left exactly as printed.
+ */
+export function canonicalizeTypeText(typeText: string): string {
+  try {
+    const file = ts.createSourceFile(
+      '__drizzle_zero_canonical_type.ts',
+      `type __T = ${typeText};`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    const parseDiagnostics = (
+      file as unknown as {parseDiagnostics?: readonly unknown[]}
+    ).parseDiagnostics;
+
+    if (parseDiagnostics && parseDiagnostics.length > 0) {
+      return typeText;
+    }
+
+    const [statement] = file.statements;
+
+    if (!statement || !ts.isTypeAliasDeclaration(statement)) {
+      return typeText;
+    }
+
+    return printCanonicalType(statement.type, file);
+  } catch {
+    return typeText;
+  }
+}
+
+const compareTypeText = (a: string, b: string): number =>
+  a < b ? -1 : a > b ? 1 : 0;
+
+const printCanonicalType = (node: ts.TypeNode, file: ts.SourceFile): string => {
+  // Unions and intersections are both commutative, and both are what
+  // TypeScript orders by type id.
+  if (ts.isUnionTypeNode(node)) {
+    return node.types
+      .map(member => printCanonicalType(member, file))
+      .sort(compareTypeText)
+      .join(' | ');
+  }
+
+  if (ts.isIntersectionTypeNode(node)) {
+    return node.types
+      .map(member => printCanonicalType(member, file))
+      .sort(compareTypeText)
+      .join(' & ');
+  }
+
+  if (ts.isParenthesizedTypeNode(node)) {
+    return `(${printCanonicalType(node.type, file)})`;
+  }
+
+  if (ts.isArrayTypeNode(node)) {
+    return `${printCanonicalType(node.elementType, file)}[]`;
+  }
+
+  // Tuple elements are positional, so only their own types are rewritten.
+  if (ts.isTupleTypeNode(node)) {
+    return `[${node.elements
+      .map(element => printCanonicalType(element, file))
+      .join(', ')}]`;
+  }
+
+  if (ts.isOptionalTypeNode(node)) {
+    return `${printCanonicalType(node.type, file)}?`;
+  }
+
+  if (ts.isRestTypeNode(node)) {
+    return `...${printCanonicalType(node.type, file)}`;
+  }
+
+  if (ts.isNamedTupleMember(node)) {
+    const optional = node.questionToken ? '?' : '';
+    return `${node.dotDotDotToken ? '...' : ''}${node.name.text}${optional}: ${printCanonicalType(node.type, file)}`;
+  }
+
+  if (ts.isTypeLiteralNode(node)) {
+    const members = node.members
+      .map(member => printCanonicalMember(member, file))
+      .sort(compareTypeText);
+
+    return members.length === 0 ? '{}' : `{${members.join('; ')}}`;
+  }
+
+  return node.getText(file);
+};
+
+const printCanonicalMember = (
+  member: ts.TypeElement,
+  file: ts.SourceFile,
+): string => {
+  if (
+    (ts.isPropertySignature(member) ||
+      ts.isIndexSignatureDeclaration(member)) &&
+    member.type
+  ) {
+    const modifiers = ts.isPropertySignature(member)
+      ? member.modifiers?.map(modifier => `${modifier.getText(file)} `).join('')
+      : undefined;
+    const name = ts.isPropertySignature(member)
+      ? member.name.getText(file)
+      : `[${member.parameters.map(parameter => parameter.getText(file)).join(', ')}]`;
+    const optional =
+      ts.isPropertySignature(member) && member.questionToken ? '?' : '';
+
+    return `${modifiers ?? ''}${name}${optional}: ${printCanonicalType(member.type, file)}`;
+  }
+
+  return member.getText(file);
 };
